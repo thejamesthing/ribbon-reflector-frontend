@@ -1,9 +1,15 @@
 // ===== BACKEND API CLIENT =====
 const API = 'https://ribbon-reflector-api.onrender.com/api';
+const TOKEN_KEY = 'rr_token';
+const getToken = () => { try { return localStorage.getItem(TOKEN_KEY); } catch { return null; } };
+const setToken = t => { try { t ? localStorage.setItem(TOKEN_KEY, t) : localStorage.removeItem(TOKEN_KEY); } catch {} };
+
 async function api(path, opts = {}) {
+  const headers = { 'Content-Type': 'application/json' };
+  const token = getToken();
+  if (token) headers.Authorization = 'Bearer ' + token;
   const res = await fetch(API + path, {
-    credentials: 'include',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     method: opts.method || 'GET',
     body: opts.body ? JSON.stringify(opts.body) : undefined,
   });
@@ -293,6 +299,7 @@ async function doLogin() {
   const password = $('#li-pw').value.trim();
   try {
     const u = await api('/auth/login', { method: 'POST', body: { email, password } });
+    if (u.token) setToken(u.token);
     store.user = { handle: u.handle, email: u.email, isMember: !!u.is_member, memberUntil: u.member_until };
     go('home');
   } catch (e) { alert('Login failed: ' + e.message); }
@@ -300,6 +307,7 @@ async function doLogin() {
 
 async function doLogout() {
   try { await api('/auth/logout', { method: 'POST' }); } catch {}
+  setToken(null);
   store.user = null;
   store._userChecked = false;
   store.myListings = [];
@@ -341,7 +349,8 @@ async function completeCheckout() {
   const pu = store.pendingUser;
   if (!pu || !pu.password) { alert('Missing signup info — please start over'); go('signup'); return; }
   try {
-    await api('/auth/signup', { method: 'POST', body: { handle: pu.handle, email: pu.email, password: pu.password } });
+    const signup = await api('/auth/signup', { method: 'POST', body: { handle: pu.handle, email: pu.email, password: pu.password } });
+    if (signup.token) setToken(signup.token);
     await api('/checkout/membership', { method: 'POST' });
     const me = await api('/me');
     store.user = { handle: me.handle, email: me.email, isMember: true, memberUntil: me.member_until };
