@@ -927,19 +927,32 @@ function selectMyListing(id) {
   render();
 }
 
-function submitOffer() {
+async function submitOffer() {
   const target = store.listings.find(x => x.id === store.compose.targetId)
     || store.myListings.find(x => x.id === store.compose.targetId);
   const mine = store.myListings.find(l => l.id === store.compose.myListingId);
   if (!target || !mine) { alert('Please pick one of your listings to offer.'); return; }
   const note = store.compose.note || `Hey ${target.owner}! I'd love to trade my ${mine.artist} ticket for your ${target.artist} ticket.`;
 
-  store.outgoingOffers.unshift({
-    id: store.nextId++, to: target.owner,
-    theirArtist: target.artist, theirVenue: target.venue, theirDate: target.date,
-    myListingId: mine.id, targetId: target.id, note,
-  });
-  addNotification('📨', `Offer sent to <strong>${target.owner}</strong> for ${target.artist}.`, 'myTickets', {tab:'outgoing'});
+  // Disable the send button while the request is in flight (Render cold starts can be slow)
+  const btn = document.querySelector('button.btn.gold');
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+
+  try {
+    await api('/offers', {
+      method: 'POST',
+      body: {
+        target_listing_id: target.id,
+        offered_listing_id: mine.id,
+        note,
+      },
+    });
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Send offer → adds to their TicketWallet'; }
+    alert('Could not send offer: ' + e.message);
+    return;
+  }
+
   store.compose = { targetId:null, myListingId:null, note:'' };
   alert(`✓ Offer sent to ${target.owner}! You'll be notified if they accept.`);
   go('myTickets', {tab:'outgoing'});
