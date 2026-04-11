@@ -1,3 +1,26 @@
+// ===== BACKEND API CLIENT =====
+const API = 'https://ribbon-reflector-api.onrender.com/api';
+async function api(path, opts = {}) {
+  const res = await fetch(API + path, {
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    method: opts.method || 'GET',
+    body: opts.body ? JSON.stringify(opts.body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `request failed (${res.status})`);
+  return data;
+}
+// Map backend listing row → frontend shape (existing pages use these field names)
+function mapListing(l) {
+  return {
+    id: l.id, artist: l.artist, venue: l.venue, city: l.city,
+    date: l.event_date, seat: l.seat, qty: l.qty, face: l.face_value,
+    owner: l.owner_handle || l.owner, status: l.status,
+    receipt: l.receipt_filename, notes: l.notes,
+  };
+}
+
 // ===== DATA STORE =====
 const store = {
   user: null, // {email, handle, isMember, memberUntil}
@@ -60,9 +83,50 @@ function addNotification(icon, text, route, params) {
 const unreadCount = () => store.notifications.filter(n => !n.read).length;
 
 // ===== ROUTER =====
-function go(route, params) {
+async function loadRouteData(route, params) {
+  try {
+    // First-time: check if we're already logged in (cookie)
+    if (!store._userChecked) {
+      store._userChecked = true;
+      try {
+        const me = await api('/me');
+        store.user = { handle: me.handle, email: me.email, isMember: !!me.is_member, memberUntil: me.member_until };
+      } catch {}
+    }
+    if (route === 'home' || route === 'browse') {
+      const f = store.filters;
+      const q = new URLSearchParams();
+      if (route === 'browse') {
+        if (f.q) q.set('q', f.q);
+        if (f.city) q.set('city', f.city);
+        if (f.maxPrice) q.set('max_price', f.maxPrice);
+        if (f.sort) q.set('sort', f.sort);
+      }
+      const rows = await api('/listings' + (q.toString() ? '?' + q.toString() : ''));
+      store.listings = rows.map(mapListing);
+    }
+    if (route === 'myTickets' && store.user) {
+      try {
+        const mine = await api('/listings?owner=' + encodeURIComponent(store.user.handle));
+        store.myListings = mine.map(mapListing);
+      } catch {}
+    }
+    if (route === 'profile') {
+      const handle = (params.handle || store.user?.handle || '').replace('@', '');
+      if (handle) {
+        try {
+          store._profileData = await api('/users/' + encodeURIComponent(handle));
+        } catch { store._profileData = null; }
+      }
+    }
+  } catch (e) { console.error('loadRouteData:', e); }
+}
+
+async function go(route, params) {
   store.route = route;
   store.params = params || {};
+  render();
+  await loadRouteData(route, params);
   render();
   window.scrollTo(0, 0);
 }
@@ -87,6 +151,7 @@ function headerHTML() {
       <div class="icon-btn bell-wrap" onclick="toggleNotifs()" title="Notifications">🔔${store.user && unreadCount() ? `<span class="bell-badge">${unreadCount()}</span>`:''}</div>
       ${store.user
         ? `<div class="avatar" onclick="go('profile',{handle:'${store.user.handle}'})" title="${store.user.handle}"></div>
+           <a onclick="doLogout()" style="font-size:13px;opacity:0.7">Sign out</a>
            <button class="post-btn" onclick="go('postTickets')">Post Tickets</button>`
         : `<a onclick="go('login')">Sign in</a>
            <button class="post-btn" onclick="go('signup')">Join $10/yr</button>`}
@@ -214,13 +279,30 @@ function loginPage() {
 function continueToCheckout() {
   const handle = $('#su-handle').value.trim() || 'folkjam';
   const email = $('#su-email').value.trim();
-  store.pendingUser = { handle: '@'+handle.replace('@',''), email };
+  const password = $('#su-pw').value.trim();
+  if (password.length < 8 || password === '••••••••') {
+    alert('Please enter a real password (8+ characters)');
+    return;
+  }
+  store.pendingUser = { handle: '@' + handle.replace('@', ''), email, password };
   go('checkout');
 }
 
-function doLogin() {
+async function doLogin() {
   const email = $('#li-email').value.trim();
-  store.user = { email, handle:'@'+(email.split('@')[0]||'fan'), isMember:true, memberUntil:'Apr 2027' };
+  const password = $('#li-pw').value.trim();
+  try {
+    const u = await api('/auth/login', { method: 'POST', body: { email, password } });
+    store.user = { handle: u.handle, email: u.email, isMember: !!u.is_member, memberUntil: u.member_until };
+    go('home');
+  } catch (e) { alert('Login failed: ' + e.message); }
+}
+
+async function doLogout() {
+  try { await api('/auth/logout', { method: 'POST' }); } catch {}
+  store.user = null;
+  store._userChecked = false;
+  store.myListings = [];
   go('home');
 }
 
@@ -255,11 +337,18 @@ function checkoutPage() {
     </div></div>`;
 }
 
-function completeCheckout() {
+async function completeCheckout() {
   const pu = store.pendingUser;
-  store.user = { ...pu, isMember:true, memberUntil:'Apr 2027' };
-  alert('✓ Payment successful — welcome to Ribbon Reflector!');
-  go('home');
+  if (!pu || !pu.password) { alert('Missing signup info — please start over'); go('signup'); return; }
+  try {
+    await api('/auth/signup', { method: 'POST', body: { handle: pu.handle, email: pu.email, password: pu.password } });
+    await api('/checkout/membership', { method: 'POST' });
+    const me = await api('/me');
+    store.user = { handle: me.handle, email: me.email, isMember: true, memberUntil: me.member_until };
+    store.pendingUser = null;
+    alert('✓ Payment successful — welcome to Ribbon Reflector!');
+    go('home');
+  } catch (e) { alert('Signup failed: ' + e.message); }
 }
 
 // ===== POST TICKETS =====
@@ -317,30 +406,27 @@ function bindPostTicketsEvents() {
   });
 }
 
-function submitListing() {
+async function submitListing() {
   const get = id => $(id)?.value.trim();
   const artist = get('#pt-artist'), venue = get('#pt-venue');
   if (!artist || !venue) { alert('Artist and venue are required.'); return; }
   if (!store._receiptName) { alert('Please upload your purchase receipt to verify face value.'); return; }
-  const listing = {
-    id: store.nextId++,
-    owner: store.user.handle,
-    artist, venue,
-    city: get('#pt-city') || '',
-    date: get('#pt-date') || 'TBD',
-    seat: get('#pt-seat') || 'GA',
-    qty: parseInt(get('#pt-qty')) || 1,
-    face: parseFloat(get('#pt-face')) || 0,
-    source: get('#pt-source'),
-    notes: get('#pt-notes'),
-    receipt: store._receiptName,
-    status: 'pending', // in review
-  };
-  store.myListings.unshift(listing);
-  store._receiptName = null;
-  addNotification('📝', `Listing submitted for <strong>${listing.artist}</strong> — we'll review it shortly.`, 'myTickets');
-  alert('✓ Listing submitted! We\'ll review it shortly — usually within an hour.');
-  go('myTickets');
+  try {
+    await api('/listings', { method: 'POST', body: {
+      artist, venue,
+      city: get('#pt-city') || null,
+      event_date: get('#pt-date') || null,
+      seat: get('#pt-seat') || null,
+      qty: parseInt(get('#pt-qty')) || 1,
+      face_value: parseFloat(get('#pt-face')) || 0,
+      source: get('#pt-source') || null,
+      notes: get('#pt-notes') || null,
+      receipt_filename: store._receiptName,
+    }});
+    store._receiptName = null;
+    alert('✓ Listing submitted! Backend auto-approves in ~2 seconds (stand-in for moderation).');
+    go('myTickets');
+  } catch (e) { alert('Failed to submit: ' + e.message); }
 }
 
 // ===== MY TICKETS DASHBOARD =====
@@ -583,12 +669,16 @@ function submitReview() {
 function profilePage() {
   const handle = store.params.handle || store.user?.handle;
   if (!handle) { go('browse'); return ''; }
-  const profile = store.profiles[handle] || { joined:'Recently', shows:[], bio:'A Ribbon Reflector member.' };
-  const reviewsAbout = store.communityReviews.filter(r => r.about === handle);
+  // Prefer real data from backend if loaded
+  const remote = store._profileData;
+  const profile = (remote && remote.user)
+    ? { joined: remote.user.created_at?.slice(0,10) || 'Recently', shows: [], bio: remote.user.bio || 'A Ribbon Reflector member.' }
+    : (store.profiles[handle] || { joined:'Recently', shows:[], bio:'A Ribbon Reflector member.' });
+  const reviewsAbout = remote?.reviews?.map(r => ({ author: r.author_handle, about: handle, stars: r.stars, text: r.body }))
+    || store.communityReviews.filter(r => r.about === handle);
   const reviewsBy = store.communityReviews.filter(r => r.author === handle);
-  const userListings = store.listings.filter(l => l.owner === handle).concat(
-    handle === store.user?.handle ? store.myListings : []
-  );
+  const userListings = remote?.listings ? remote.listings.map(mapListing)
+    : store.listings.filter(l => l.owner === handle).concat(handle === store.user?.handle ? store.myListings : []);
   const avgStars = reviewsAbout.length
     ? (reviewsAbout.reduce((s,r) => s + r.stars, 0) / reviewsAbout.length)
     : 0;
