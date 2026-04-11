@@ -1001,4 +1001,5 @@ function render() {
   if (store.route === 'dispute') bindDisputeEvents();
 }
 
-render();
+// On initial load, go through the router so /api/me is called with the stored token
+go('home');
