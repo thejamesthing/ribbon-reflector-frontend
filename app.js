@@ -38,9 +38,7 @@ const store = {
     {id:4,owner:'@ssun.room',artist:'King Gizzard & The Lizard Wizard',venue:'The Rady Shell',city:'San Diego, CA',date:'Aug 11, 2026',seat:'Sec MARLFT',face:165,qty:2,status:'active',receipt:'axs.pdf'},
   ],
   myListings: [],
-  incomingOffers: [
-    {id:101,from:'@deadhead_42',forListing:null,offering:{artist:'Goose',venue:'Brooklyn Paramount',date:'Nov 8, 2026',seat:'GA Floor',face:95},status:'pending'},
-  ],
+  incomingOffers: [],
   outgoingOffers: [],
   completedTrades: [
     {id:201,partner:'@marisol_k',gave:'Vampire Weekend · Fillmore',got:'Mitski · Radio City',date:'Mar 2026',rating:5},
@@ -62,12 +60,7 @@ const store = {
   },
   filters: { q:'', city:'', maxPrice:'', sort:'newest' },
   reviewRating: 0,
-  notifications: [
-    {id:901,icon:'🎟️',text:'<strong>@deadhead_42</strong> sent you an offer for Phish at Hampton.',time:'2m ago',read:false,route:'myTickets',params:{tab:'incoming'}},
-    {id:902,icon:'💬',text:'New message from <strong>@marisol_k</strong> about your Goose tickets.',time:'1h ago',read:false,route:'wallet'},
-    {id:903,icon:'✨',text:'Your listing for <strong>King Gizzard</strong> was approved and is now live.',time:'3h ago',read:true,route:'myTickets'},
-    {id:904,icon:'⭐',text:'<strong>@peach.pit</strong> left you a 5-star review.',time:'yesterday',read:true,route:'profile',params:{handle:'@folkjam'}},
-  ],
+  notifications: [],
   notifPanelOpen: false,
   disputes: [],
   dispute: { reason:'', details:'', evidence:null },
@@ -116,6 +109,13 @@ async function loadRouteData(route, params) {
         const mine = await api('/listings?owner=' + encodeURIComponent(store.user.handle));
         store.myListings = mine.map(mapListing);
       } catch {}
+      // Fetch real offers for both tabs on every myTickets navigation (per Session B plan)
+      try { store.incomingOffers = await api('/offers/incoming'); } catch { store.incomingOffers = []; }
+      try { store.outgoingOffers = await api('/offers/outgoing'); } catch { store.outgoingOffers = []; }
+    }
+    // Refresh notifications on every navigation when logged in — cheap and keeps the bell current
+    if (store.user) {
+      try { store.notifications = await api('/notifications'); } catch { /* leave existing */ }
     }
     if (route === 'profile') {
       const handle = (params.handle || store.user?.handle || '').replace('@', '');
@@ -461,19 +461,42 @@ function renderMyTicketsTab(tab) {
     if (!store.myListings.length) return emptyState('No active listings yet','Post your first ticket to start trading.','Post Tickets','postTickets');
     return `<div class="grid g3">${store.myListings.map(cardHTML).join('')}</div>`;
   }
-  if (tab === 'incoming') {
-    if (!store.incomingOffers.length) return emptyState('No incoming offers','When someone wants to trade for your tickets, they\'ll appear here.');
-    return store.incomingOffers.map(o => `<div class="list-row">
-      <div class="info"><h4>Offer from ${hl(o.from)}</h4><div class="sub">Wants to trade <strong>${o.offering.artist}</strong> · ${o.offering.venue} · ${o.offering.date} · ${o.offering.seat} (${fmt(o.offering.face)})</div></div>
-      <div style="display:flex;gap:8px"><button class="btn sm" onclick="acceptIncoming(${o.id})">Accept</button><button class="btn sm ghost" onclick="declineIncoming(${o.id})">Decline</button></div>
-    </div>`).join('');
+if (tab === 'incoming') {
+    if (!store.incomingOffers.length) return emptyState('No incoming offers','When someone makes a cash offer on one of your listings, it\'ll appear here.');
+    return store.incomingOffers.map(o => {
+      const amt = (o.amount_cents / 100).toFixed(2);
+      const face = Number(o.target_face_value).toFixed(2);
+      const noteHTML = o.note ? `<div class="sub" style="margin-top:6px;font-style:italic">"${o.note}"</div>` : '';
+      return `<div class="list-row">
+        <div class="info">
+          <h4>${hl('@' + o.from_handle)} offered <strong>$${amt}</strong> for ${o.target_artist}</h4>
+          <div class="sub">${o.target_venue} · ${o.target_date} · ${o.target_seat} (face $${face})</div>
+          ${noteHTML}
+        </div>
+        <div style="display:flex;gap:8px">
+          <button class="btn sm" disabled title="Accept flow ships next session">Accept</button>
+          <button class="btn sm ghost" onclick="declineIncoming(${o.id})">Decline</button>
+        </div>
+      </div>`;
+    }).join('');
   }
   if (tab === 'outgoing') {
     if (!store.outgoingOffers.length) return emptyState('No outgoing offers','Browse listings and make your first offer.','Browse listings','browse');
-    return store.outgoingOffers.map(o => `<div class="list-row">
-      <div class="info"><h4>Offer to ${hl(o.to)}</h4><div class="sub">${o.theirArtist} · ${o.theirVenue} · ${o.theirDate}</div></div>
-      <span class="pill orange">Awaiting response</span>
-    </div>`).join('');
+    return store.outgoingOffers.map(o => {
+      const amt = (o.amount_cents / 100).toFixed(2);
+      const statusPill = o.status === 'pending'
+        ? `<span class="pill orange">Awaiting response</span>`
+        : o.status === 'accepted'
+        ? `<span class="pill">Accepted</span>`
+        : `<span class="pill" style="opacity:0.6">${o.status}</span>`;
+      return `<div class="list-row">
+        <div class="info">
+          <h4>Offered <strong>$${amt}</strong> to ${hl('@' + o.to_handle)}</h4>
+          <div class="sub">${o.target_artist} · ${o.target_venue}</div>
+        </div>
+        ${statusPill}
+      </div>`;
+    }).join('');
   }
   if (tab === 'completed') {
     if (!store.completedTrades.length) return emptyState('No completed trades yet','Your trade history will appear here.');
@@ -489,29 +512,23 @@ function emptyState(title, sub, btnLabel, btnRoute) {
 }
 
 function acceptIncoming(id) {
-  const o = store.incomingOffers.find(x => x.id === id);
-  if (!o) return;
-  store.incomingOffers = store.incomingOffers.filter(x => x.id !== id);
-  // Create the active trade
-  const myListing = store.myListings[0] || {artist:'Your ticket',venue:'Venue',date:'TBD',seat:'GA',face:0};
-  store.activeTrade = {
-    id: 'RR-' + (4800 + store.nextId++),
-    stage: 1, // Already accepted — cards just charged
-    partner: o.from,
-    mine: { artist: myListing.artist, venue: myListing.venue, date: myListing.date, seat: myListing.seat, face: myListing.face },
-    theirs: { ...o.offering, owner: o.from },
-    messages: [
-      { who:'them', text:`Thanks for accepting! I'll transfer my ${o.offering.artist} ticket through ${o.offering.venue.includes('Radio')?'AXS':'Ticketmaster'} shortly.` },
-      { who:'me', text:`Sounds great — I'll send mine right after. Talk soon!` },
-    ],
-  };
-  addNotification('🎉', `You accepted <strong>${o.from}</strong>'s offer — both cards charged.`, 'wallet');
-  go('wallet');
+  // Accept flow ships in Session C. Button is disabled in the UI; this is a no-op safety net.
+  console.warn('acceptIncoming called but accept flow is not yet wired');
 }
-function declineIncoming(id) {
-  store.incomingOffers = store.incomingOffers.filter(x => x.id !== id);
+
+async function declineIncoming(id) {
+  if (!confirm('Decline this offer? The buyer will be notified.')) return;
+  try {
+    await api(`/offers/${id}/decline`, { method: 'POST' });
+  } catch (e) {
+    alert('Could not decline offer: ' + e.message);
+    return;
+  }
+  // Refetch from backend so the list stays in sync with the DB.
+  try { store.incomingOffers = await api('/offers/incoming'); } catch { store.incomingOffers = []; }
   render();
 }
+
 
 function openListing(id) {
   if (!requireAuth()) return;
