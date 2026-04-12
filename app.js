@@ -71,7 +71,7 @@ const store = {
   notifPanelOpen: false,
   disputes: [],
   dispute: { reason:'', details:'', evidence:null },
-  compose: { targetId:null, myListingId:null, note:'' },
+  compose: { targetId:null, amountCents:null, note:'' },
   nextId: 1000,
 };
 
@@ -858,68 +858,62 @@ function composeOfferPage() {
     || store.myListings.find(x => x.id === store.compose.targetId);
   if (!target) { go('browse'); return ''; }
 
-  const eligibleListings = store.myListings.filter(l => l.status === 'active' || l.status === 'pending');
-  const selected = eligibleListings.find(l => l.id === store.compose.myListingId) || eligibleListings[0];
-  const priceDelta = selected ? Number(target.face) - Number(selected.face) : 0;
-  const priceMatch = Math.abs(priceDelta) < 1;
+  const faceCents = Math.round(Number(target.face) * 100);
+  const currentCents = store.compose.amountCents;
+  // Display value for the input: dollars with 2 decimals, or empty if nothing entered yet.
+  const amountDisplay = (currentCents != null && currentCents > 0)
+    ? (currentCents / 100).toFixed(2)
+    : '';
+  const overCap = currentCents != null && currentCents > faceCents;
+  const validAmount = currentCents != null && currentCents > 0 && currentCents <= faceCents;
 
   return `${headerHTML()}<div class="sub-page">
-    <h2>Compose your offer</h2><span class="mono">Trading with ${hl(target.owner)}</span>
+    <h2>Make a cash offer</h2><span class="mono">Offering on ${hl(target.owner)}'s listing</span>
 
-    ${eligibleListings.length === 0 ? `
-    <div class="notice" style="border-color:var(--orange)">
-      <strong>You don't have any tickets to offer yet.</strong> Post a ticket first, then come back to make this trade.
-    </div>
-    <div class="actions"><button class="btn" onclick="go('postTickets')">Post a ticket</button>
-    <button class="btn ghost" onclick="go('browse')">Back to browse</button></div>
-    </div>` : `
-
-    <div class="two-col">
-      <div class="panel">
-        <h4>You want</h4>
-        <p style="font-size:18px;font-weight:600">${target.artist}</p>
-        <p style="color:var(--muted);font-size:13px;margin-top:4px">${target.venue} · ${target.city||''}</p>
-        <p style="font-size:13px">${target.date} · ${target.seat}</p>
-        <p style="margin-top:10px">Face value: <strong>${fmt(target.face)}</strong></p>
-        <p style="font-size:11px;color:var(--magenta);margin-top:8px;letter-spacing:0.1em;text-transform:uppercase">Listed by ${target.owner}</p>
-        <a class="handle-link" style="display:inline-block;margin-top:10px;font-size:12px" onclick="go('event',{key:'${eventKey(target)}'})">See all tickets for this show →</a>
-      </div>
-      <div class="panel">
-        <h4>You'll offer</h4>
-        <div class="field"><label>Pick from your listings</label>
-          <select onchange="selectMyListing(this.value)">
-            ${eligibleListings.map(l => `<option value="${l.id}" ${selected?.id===l.id?'selected':''}>${l.artist} · ${l.venue} · ${fmt(l.face)}</option>`).join('')}
-          </select>
-        </div>
-        ${selected ? `
-          <p style="color:var(--muted);font-size:13px;margin-top:4px">${selected.venue}</p>
-          <p style="font-size:13px">${selected.date} · ${selected.seat}</p>
-          <p style="margin-top:10px">Face value: <strong>${fmt(selected.face)}</strong></p>
-        ` : ''}
-      </div>
+    <div class="panel" style="margin-top:20px">
+      <h4>You want</h4>
+      <p style="font-size:18px;font-weight:600">${target.artist}</p>
+      <p style="color:var(--muted);font-size:13px;margin-top:4px">${target.venue} · ${target.city||''}</p>
+      <p style="font-size:13px">${target.date} · ${target.seat}</p>
+      <p style="margin-top:10px">Face value: <strong>${fmt(target.face)}</strong></p>
+      <p style="font-size:11px;color:var(--magenta);margin-top:8px;letter-spacing:0.1em;text-transform:uppercase">Listed by ${target.owner}</p>
+      <a class="handle-link" style="display:inline-block;margin-top:10px;font-size:12px" onclick="go('event',{key:'${eventKey(target)}'})">See all tickets for this show →</a>
     </div>
 
-    <div class="panel" style="margin-top:20px;${priceMatch?'':'border-color:var(--orange)'}">
-      <h4>Price match</h4>
-      ${priceMatch
-        ? `<p style="color:var(--green);font-size:14px">✓ Face values match — straight swap, no balancing payment needed.</p>`
-        : `<p style="color:var(--orange);font-size:14px">⚠ Face values differ by ${fmt(Math.abs(priceDelta))}. ${priceDelta > 0
-            ? `You'd owe <strong>${target.owner}</strong> the difference at checkout.`
-            : `<strong>${target.owner}</strong> would owe you the difference at checkout.`}</p>`}
+    <div class="panel" style="margin-top:20px;${overCap?'border-color:var(--orange)':''}">
+      <h4>Your offer</h4>
+      <div class="field">
+        <label>Offer amount (USD) — max ${fmt(target.face)}</label>
+        <input type="number" id="compose-amount" min="0.01" max="${(faceCents/100).toFixed(2)}" step="0.01"
+               placeholder="0.00" value="${amountDisplay}"
+               oninput="updateOfferAmount(this.value)">
+      </div>
+      ${overCap
+        ? `<p style="color:var(--orange);font-size:13px">⚠ Offer exceeds face value. Cap is ${fmt(target.face)}.</p>`
+        : `<p style="color:var(--muted);font-size:12px">Ribbon Reflector is face-value only. Offers cannot exceed the listed face value.</p>`}
     </div>
 
     <div class="panel" style="margin-top:20px">
       <h4>Message to ${target.owner}</h4>
-      <div class="field"><textarea id="compose-note" placeholder="Introduce yourself, share which show you're going to, and let them know why this trade would work for you..." oninput="store.compose.note=this.value">${store.compose.note}</textarea></div>
-      <p style="font-size:12px;color:var(--muted)">This message starts the chat. The lister sees it in their Incoming Offers tab and can accept, decline, or reply.</p>
+      <div class="field"><textarea id="compose-note" placeholder="Introduce yourself and let them know why you're interested..." oninput="store.compose.note=this.value">${store.compose.note}</textarea></div>
+      <p style="font-size:12px;color:var(--muted)">The seller sees this with your offer and can accept, decline, or reply.</p>
     </div>
 
     <div class="actions">
-      <button class="btn gold" onclick="submitOffer()">Send offer → adds to their TicketWallet</button>
+      <button class="btn gold" onclick="submitOffer()" ${validAmount?'':'disabled'}>Send offer</button>
       <button class="btn ghost" onclick="go('browse')">Cancel</button>
     </div>
-    `}
   </div>`;
+}
+
+function updateOfferAmount(v) {
+  const n = parseFloat(v);
+  if (!isFinite(n) || n <= 0) {
+    store.compose.amountCents = null;
+  } else {
+    store.compose.amountCents = Math.round(n * 100);
+  }
+  render();
 }
 
 function selectMyListing(id) {
@@ -930,11 +924,15 @@ function selectMyListing(id) {
 async function submitOffer() {
   const target = store.listings.find(x => x.id === store.compose.targetId)
     || store.myListings.find(x => x.id === store.compose.targetId);
-  const mine = store.myListings.find(l => l.id === store.compose.myListingId);
-  if (!target || !mine) { alert('Please pick one of your listings to offer.'); return; }
-  const note = store.compose.note || `Hey ${target.owner}! I'd love to trade my ${mine.artist} ticket for your ${target.artist} ticket.`;
+  if (!target) { alert('Listing not found.'); return; }
 
-  // Disable the send button while the request is in flight (Render cold starts can be slow)
+  const amt = store.compose.amountCents;
+  const faceCents = Math.round(Number(target.face) * 100);
+  if (!amt || amt <= 0) { alert('Enter an offer amount.'); return; }
+  if (amt > faceCents) { alert(`Offer cannot exceed face value (${fmt(target.face)}).`); return; }
+
+  const note = store.compose.note || `Hi ${target.owner}, I'd like to buy your ${target.artist} ticket.`;
+
   const btn = document.querySelector('button.btn.gold');
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
 
@@ -943,17 +941,17 @@ async function submitOffer() {
       method: 'POST',
       body: {
         target_listing_id: target.id,
-        offered_listing_id: mine.id,
+        amount_cents: amt,
         note,
       },
     });
   } catch (e) {
-    if (btn) { btn.disabled = false; btn.textContent = 'Send offer → adds to their TicketWallet'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Send offer'; }
     alert('Could not send offer: ' + e.message);
     return;
   }
 
-  store.compose = { targetId:null, myListingId:null, note:'' };
+  store.compose = { targetId:null, amountCents:null, note:'' };
   alert(`✓ Offer sent to ${target.owner}! You'll be notified if they accept.`);
   go('myTickets', {tab:'outgoing'});
 }
