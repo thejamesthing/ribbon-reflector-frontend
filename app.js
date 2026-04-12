@@ -171,8 +171,8 @@ function homePage() {
   return `
   <div class="hero-wrap">${headerHTML()}
     <div class="hero">
-      <h1>Face Value Movement</h1>
-      <p class="tag">No scalpers, no brokers.<br>Just real people sharing our love for music.</p>
+      <h1>Face Value Tickets</h1>
+      <p class="tag">Built by fans, for fans.<br>The show you love at the real price.</p>
       <div class="hero-tabs"><a class="active" onclick="go('browse')">Find Tickets</a><a onclick="go('postTickets')">Post Tickets</a><a>Create Alerts</a></div>
       <div class="search">🔍 <input placeholder="Search for artists, venues, or events"></div>
     </div>
@@ -180,7 +180,7 @@ function homePage() {
   <div class="body-section">
     <div class="greeting">${store.user ? 'Hi '+store.user.handle.replace('@','') : 'Welcome, friend'}</div>
     <div class="greeting-sub">${store.user?.isMember ? 'Membership active · $10/year · face value only' : 'Join the community for $10/year — face value only.'}</div>
-    <div class="section-head"><h2>${store.user?'My Listings':'Featured Tickets'}</h2><a onclick="go('browse')">View All →</a></div>
+    <div class="section-head"><h2>Popular Events</h2><a onclick="go('browse')">View All →</a></div>
     <div class="grid">${mine.map(cardHTML).join('')}</div>
   </div>
   <footer>Ribbon Reflector ❦ Fan-to-fan, face value, forever.</footer>`;
