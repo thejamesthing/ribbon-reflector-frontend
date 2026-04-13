@@ -89,7 +89,7 @@ async function loadRouteData(route, params) {
       store._userChecked = true;
       try {
         const me = await api('/me');
-        store.user = { handle: me.handle, email: me.email, isMember: !!me.is_member, memberUntil: me.member_until };
+        store.user = { handle: me.handle, email: me.email, isMember: !!me.is_member, memberUntil: me.member_until, emailVerified: !!me.email_verified };
       } catch {}
     }
     if (route === 'home' || route === 'browse') {
@@ -177,7 +177,12 @@ const requireAuth = () => { if (!store.user) { go('signup'); return false; } ret
 // ===== HEADER =====
 function headerHTML() {
   const isMember = store.user?.isMember;
-  return `<header>
+  const needsVerify = store.user && store.user.emailVerified === false;
+  const banner = needsVerify ? `<div style="background:linear-gradient(90deg,#ff7a2e,#ffb84d);color:#1a1a1a;padding:10px 22px;text-align:center;font-size:14px;font-weight:500">
+    <span>⚠️ Please verify your email to list tickets and make offers.</span>
+    <a onclick="resendVerification()" style="text-decoration:underline;cursor:pointer;margin-left:10px">Resend email</a>
+  </div>` : '';
+  return `${banner}<header>
     <div class="logo" onclick="go('home')"><div class="logo-mark">❦</div>Ribbon Reflector</div>
     <nav class="top">
       ${store.user ? `<a onclick="go('myTickets')">My Tickets</a>` : ''}
@@ -330,6 +335,11 @@ async function doLogin() {
   try {
     const u = await api('/auth/login', { method: 'POST', body: { email, password } });
     if (u.token) setToken(u.token);
+    // Pull the canonical verified flag; login response carries it but /me is authoritative.
+    try {
+      const me = await api('/me');
+      store.user = { handle: me.handle, email: me.email, isMember: !!me.is_member, memberUntil: me.member_until, emailVerified: !!me.email_verified };
+    } catch {}
     store.user = { handle: u.handle, email: u.email, isMember: !!u.is_member, memberUntil: u.member_until };
     go('home');
   } catch (e) { alert('Login failed: ' + e.message); }
@@ -383,9 +393,9 @@ async function completeCheckout() {
     if (signup.token) setToken(signup.token);
     await api('/checkout/membership', { method: 'POST' });
     const me = await api('/me');
-    store.user = { handle: me.handle, email: me.email, isMember: true, memberUntil: me.member_until };
+    store.user = { handle: me.handle, email: me.email, isMember: true, memberUntil: me.member_until, emailVerified: !!me.email_verified };
     store.pendingUser = null;
-    alert('✓ Payment successful — welcome to Ribbon Reflector!');
+    alert('✓ Welcome to Ribbon Reflector! We sent a verification link to ' + me.email + ' — please confirm it to start listing and making offers.');
     go('home');
   } catch (e) { alert('Signup failed: ' + e.message); }
 }
@@ -1371,5 +1381,58 @@ function render() {
   if (store.route === 'dispute') bindDisputeEvents();
 }
 
-// On initial load, go through the router so /api/me is called with the stored token
+// ===== EMAIL VERIFICATION (Step 9a) =====
+// Parses ?verify=TOKEN out of the URL on initial load, calls the backend, and
+// strips the query string so a refresh doesn't re-trigger the call.
+async function handleInitialUrl() {
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('verify');
+    if (token) {
+      window.history.replaceState({}, '', window.location.pathname);
+      await verifyEmailToken(token);
+    }
+  } catch (e) {
+    console.error('handleInitialUrl:', e);
+  }
+}
+
+async function verifyEmailToken(token) {
+  try {
+    const result = await api('/auth/verify-email/' + encodeURIComponent(token), { method: 'POST' });
+    // Update local state if the viewer happens to be logged in as this account.
+    if (store.user) {
+      try {
+        const me = await api('/me');
+        store.user = { ...store.user, emailVerified: !!me.email_verified };
+      } catch {}
+    }
+    alert(result.already
+      ? '✓ Email already verified — you\'re good to go.'
+      : '✓ Email verified! You can now list tickets and make offers.');
+    render();
+  } catch (e) {
+    alert('Could not verify email: ' + e.message + '\n\nThe link may have expired. Sign in and click Resend email to get a new one.');
+  }
+}
+
+async function resendVerification() {
+  if (!store.user) { go('login'); return; }
+  try {
+    const r = await api('/auth/resend-verification', { method: 'POST' });
+    if (r.already_verified) {
+      // Sync local state if backend disagrees with us.
+      store.user.emailVerified = true;
+      render();
+      alert('✓ Already verified.');
+    } else {
+      alert('✓ Sent! Check ' + store.user.email + ' for the new link.');
+    }
+  } catch (e) {
+    alert('Could not send email: ' + e.message);
+  }
+}
+
+// On initial load, check for a verification token in the URL, then route.
+handleInitialUrl();
 go('home');
