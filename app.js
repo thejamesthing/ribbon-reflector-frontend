@@ -797,6 +797,21 @@ function profilePage() {
   const initial = handle.replace('@','').charAt(0).toUpperCase();
   const totalTrades = reviewsAbout.length + reviewsBy.length;
   const isMe = handle === store.user?.handle;
+  const friendsCount = remote?.friends_count ?? 0;
+  const fStatus = remote?.friendship_status || (isMe ? 'self' : 'none');
+  let friendBtn = '';
+  if (store.user && !isMe) {
+    if (fStatus === 'friends') {
+      friendBtn = `<button class="btn ghost" onclick="removeFriend('${handle}')">Friends ✓ — Unfriend</button>`;
+    } else if (fStatus === 'pending_outgoing') {
+      friendBtn = `<button class="btn ghost" onclick="removeFriend('${handle}')">Pending — Cancel request</button>`;
+    } else if (fStatus === 'pending_incoming') {
+      friendBtn = `<button class="btn gold" onclick="acceptFriend('${handle}')">Accept friend request</button>
+        <button class="btn ghost" onclick="removeFriend('${handle}')">Decline</button>`;
+    } else {
+      friendBtn = `<button class="btn gold" onclick="addFriend('${handle}')">+ Add friend</button>`;
+    }
+  }
 
   return `${headerHTML()}<div class="sub-page">
     <div class="profile-hero">
@@ -809,7 +824,9 @@ function profilePage() {
           <div class="stat"><span class="num">${totalTrades}</span><span class="lbl">Total trades</span></div>
           <div class="stat"><span class="num">${avgStars ? avgStars.toFixed(1) : '—'}</span><span class="lbl">Avg rating</span></div>
           <div class="stat"><span class="num">${reviewsAbout.length}</span><span class="lbl">Reviews received</span></div>
+          <div class="stat"><span class="num">${friendsCount}</span><span class="lbl">Friends</span></div>
         </div>
+        ${friendBtn ? `<div class="actions" style="margin-top:14px">${friendBtn}</div>` : ''}
         <div class="trust-bar">
           <div class="trust-track"><div class="trust-fill" style="width:${trustPct}%"></div></div>
           <div class="trust-label">Trust score: ${trustPct}%</div>
@@ -833,6 +850,38 @@ function profilePage() {
       </div>`).join('') : `<p style="color:var(--muted)">No reviews yet. Be the first to trade with ${handle}!</p>`}
     </div>
   </div>`;
+}
+
+// ===== FRIENDS =====
+async function refetchProfile(handle) {
+  try {
+    store._profileData = await api('/users/' + encodeURIComponent(handle.replace('@','')));
+  } catch (e) {
+    console.error('refetchProfile:', e);
+  }
+  render();
+}
+
+async function addFriend(handle) {
+  if (!requireAuth()) return;
+  try { await api('/friends/' + encodeURIComponent(handle), { method:'POST' }); }
+  catch (e) { alert('Could not send friend request: ' + e.message); return; }
+  await refetchProfile(handle);
+}
+
+async function acceptFriend(handle) {
+  if (!requireAuth()) return;
+  try { await api('/friends/' + encodeURIComponent(handle) + '/accept', { method:'POST' }); }
+  catch (e) { alert('Could not accept request: ' + e.message); return; }
+  await refetchProfile(handle);
+}
+
+async function removeFriend(handle) {
+  if (!requireAuth()) return;
+  if (!confirm('Remove this friendship / request?')) return;
+  try { await api('/friends/' + encodeURIComponent(handle), { method:'DELETE' }); }
+  catch (e) { alert('Could not update friendship: ' + e.message); return; }
+  await refetchProfile(handle);
 }
 
 // ===== NOTIFICATIONS =====
