@@ -89,7 +89,12 @@ async function loadRouteData(route, params) {
       store._userChecked = true;
       try {
         const me = await api('/me');
-        store.user = { handle: me.handle, email: me.email, isMember: !!me.is_member, memberUntil: me.member_until, emailVerified: !!me.email_verified };
+        store.user = {
+          handle: me.handle, email: me.email,
+          isMember: !!me.is_member, memberUntil: me.member_until,
+          emailVerified: !!me.email_verified,
+          stripeStatus: me.stripe_account_status || 'none',
+        };
       } catch {}
     }
     if (route === 'home' || route === 'browse') {
@@ -339,7 +344,12 @@ async function doLogin() {
     // Pull the canonical verified flag; login response carries it but /me is authoritative.
     try {
       const me = await api('/me');
-      store.user = { handle: me.handle, email: me.email, isMember: !!me.is_member, memberUntil: me.member_until, emailVerified: !!me.email_verified };
+      store.user = {
+        handle: me.handle, email: me.email,
+        isMember: !!me.is_member, memberUntil: me.member_until,
+        emailVerified: !!me.email_verified,
+        stripeStatus: me.stripe_account_status || 'none',
+      };
     } catch {}
     store.user = { handle: u.handle, email: u.email, isMember: !!u.is_member, memberUntil: u.member_until };
     go('home');
@@ -394,7 +404,12 @@ async function completeCheckout() {
     if (signup.token) setToken(signup.token);
     await api('/checkout/membership', { method: 'POST' });
     const me = await api('/me');
-    store.user = { handle: me.handle, email: me.email, isMember: true, memberUntil: me.member_until, emailVerified: !!me.email_verified };
+    store.user = {
+      handle: me.handle, email: me.email,
+      isMember: true, memberUntil: me.member_until,
+      emailVerified: !!me.email_verified,
+      stripeStatus: me.stripe_account_status || 'none',
+    };
     store.pendingUser = null;
     alert('✓ Welcome to Ribbon Reflector! We sent a verification link to ' + me.email + ' — please confirm it to start listing and making offers.');
     go('home');
@@ -869,6 +884,7 @@ function profilePage() {
           ${friendsStat}
         </div>
         ${(friendBtn || editBtn) ? `<div class="actions" style="margin-top:14px">${friendBtn}${editBtn}</div>` : ''}
+        ${isMe ? renderPayoutsBlock() : ''}
         <div class="trust-bar">
           <div class="trust-track"><div class="trust-fill" style="width:${trustPct}%"></div></div>
           <div class="trust-label">Trust score: ${trustPct}%</div>
@@ -924,6 +940,43 @@ async function removeFriend(handle) {
   try { await api('/friends/' + encodeURIComponent(handle), { method:'DELETE' }); }
   catch (e) { alert('Could not update friendship: ' + e.message); return; }
   await refetchProfile(handle);
+}
+
+// Renders the Payouts status block on the user's own profile.
+// Three states: 'none' (not started), 'pending' (mid-onboarding), 'enabled' (ready).
+function renderPayoutsBlock() {
+  const status = store.user?.stripeStatus || 'none';
+  if (status === 'enabled') {
+    return `<div class="panel" style="margin-top:14px;padding:14px 18px;background:linear-gradient(90deg,#22c55e22,#16a34a22);border-color:#22c55e44">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <strong style="color:#22c55e">✓ Payouts connected</strong>
+          <div style="color:var(--muted);font-size:13px;margin-top:4px">You can accept offers; funds will be sent to your linked bank.</div>
+        </div>
+        <button class="btn ghost" onclick="openStripeDashboard()">Stripe dashboard</button>
+      </div>
+    </div>`;
+  }
+  if (status === 'pending') {
+    return `<div class="panel" style="margin-top:14px;padding:14px 18px;background:linear-gradient(90deg,#ff7a2e22,#ffb84d22);border-color:#ff7a2e66">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div>
+          <strong style="color:#ff7a2e">⏳ Payouts setup incomplete</strong>
+          <div style="color:var(--muted);font-size:13px;margin-top:4px">Stripe needs more info before you can accept offers.</div>
+        </div>
+        <button class="btn gold" onclick="startStripeOnboarding()">Continue setup</button>
+      </div>
+    </div>`;
+  }
+  return `<div class="panel" style="margin-top:14px;padding:14px 18px">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+      <div>
+        <strong>💰 Connect payouts to accept offers</strong>
+        <div style="color:var(--muted);font-size:13px;margin-top:4px">Takes about 5 minutes. You'll need your bank info and an ID.</div>
+      </div>
+      <button class="btn gold" onclick="startStripeOnboarding()">Connect with Stripe</button>
+    </div>
+  </div>`;
 }
 
 // ===== EDIT PROFILE (Step 8a) =====
@@ -1391,6 +1444,7 @@ async function handleInitialUrl() {
     const params = new URLSearchParams(window.location.search);
     const verifyToken = params.get('verify');
     const resetToken = params.get('reset');
+    const stripeReturn = params.get('stripe_return');
     if (verifyToken) {
       window.history.replaceState({}, '', window.location.pathname);
       await verifyEmailToken(verifyToken);
@@ -1399,6 +1453,14 @@ async function handleInitialUrl() {
       window.history.replaceState({}, '', window.location.pathname);
       await go('resetPassword', { token: resetToken });
       return true;
+    } else if (stripeReturn) {
+      // User just came back from Stripe Express onboarding. Strip query, refresh status, show toast.
+      window.history.replaceState({}, '', window.location.pathname);
+      await refreshStripeStatus();
+      const status = store.user?.stripeStatus;
+      if (status === 'enabled') alert('✓ Payouts connected — you can now accept offers.');
+      else if (status === 'pending') alert('Stripe needs a bit more info. Click "Continue setup" on your profile to finish.');
+      // Fall through to normal home routing.
     }
   } catch (e) {
     console.error('handleInitialUrl:', e);
@@ -1437,6 +1499,41 @@ async function resendVerification() {
     }
   } catch (e) {
     alert('Could not send email: ' + e.message);
+  }
+}
+
+// ===== STRIPE CONNECT (Phase 1) =====
+async function startStripeOnboarding() {
+  if (!requireAuth()) return;
+  if (!store.user.emailVerified) { alert('Please verify your email first.'); return; }
+  try {
+    const r = await api('/stripe/connect-onboarding', { method: 'POST' });
+    // Full-page redirect to Stripe-hosted onboarding.
+    window.location.href = r.url;
+  } catch (e) {
+    alert('Could not start payout setup: ' + e.message);
+  }
+}
+
+async function openStripeDashboard() {
+  if (!requireAuth()) return;
+  try {
+    const r = await api('/stripe/dashboard-link', { method: 'POST' });
+    window.open(r.url, '_blank');
+  } catch (e) {
+    alert('Could not open dashboard: ' + e.message);
+  }
+}
+
+// Pull authoritative status from backend (which calls Stripe). Updates store.user.stripeStatus.
+async function refreshStripeStatus() {
+  if (!store.user) return;
+  try {
+    const r = await api('/stripe/account-status');
+    store.user.stripeStatus = r.status;
+    return r;
+  } catch (e) {
+    console.error('refreshStripeStatus:', e);
   }
 }
 
