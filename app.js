@@ -149,6 +149,18 @@ async function loadRouteData(route, params) {
         store._walletPollId = setInterval(pollWalletTrade, 8000);
       }
     }
+    if (route === 'payTrade' && store.user) {
+      const tradeId = params?.tradeId || store._payTrade?.trade_id;
+      if (tradeId) {
+        try {
+          const pay = await api('/trades/' + tradeId + '/payment');
+          store._payTrade = { trade_id: tradeId, ...pay };
+        } catch (e) {
+          console.error('payTrade fetch failed:', e);
+          store._payTrade = { trade_id: tradeId, error: e.message };
+        }
+      }
+    }
     if (route === 'friends' && store.user) {
       try { store._friendsData = await api('/friends'); }
       catch (e) { console.error('friends fetch failed:', e); store._friendsData = { friends:[], incoming:[], outgoing:[] }; }
@@ -578,8 +590,7 @@ async function acceptIncoming(id) {
   }
   // Refetch incoming offers so the accepted (and any auto-declined siblings) drop off the list.
   try { store.incomingOffers = await api('/offers/incoming'); } catch { store.incomingOffers = []; }
-  // Navigate to the wallet view for this trade. walletPage gets rebuilt in Step 6;
-  // for now this hands off the trade_id we got back so the next step has it ready.
+  alert('✓ Offer accepted. The buyer has been asked to pay — you\'ll be able to mark the ticket sent once they do.');
   go('wallet', { tradeId: result.trade_id });
 }
 
@@ -638,6 +649,10 @@ function walletPage() {
   const disputed = t.status === 'disputed';
   const complete = t.status === 'complete';
   const amount = (t.amount_cents || 0) / 100;
+  // Phase 2: if payment isn't complete yet, show a pay-now CTA (buyer) or waiting state (seller).
+  const paymentPending = t.payment_status === 'pending';
+  const paymentPaid    = t.payment_status === 'paid';
+  const paymentFailed  = t.payment_status === 'failed' || t.payment_status === 'canceled';
 
   const statusHTML = TRADE_STAGES.map((s,i) => {
     const cls = i < stage ? 'done' : i === stage ? 'active' : '';
@@ -650,8 +665,15 @@ function walletPage() {
   }).join('');
 
   // Role-conditional action button. One-directional: seller acts first, then buyer.
+  // Payment gate layered on top: nothing else happens until payment_status === 'paid'.
   let actionBtn = '';
-  if (!disputed && !complete) {
+  if (paymentFailed) {
+    actionBtn = `<span class="mono" style="color:var(--red)">Payment ${t.payment_status} — this trade was canceled.</span>`;
+  } else if (paymentPending && isBuyer) {
+    actionBtn = `<button class="btn gold" onclick="go('payTrade',{tradeId:${t.id}})">Pay now to complete your purchase</button>`;
+  } else if (paymentPending && isSeller) {
+    actionBtn = `<span class="mono" style="color:var(--muted)">Waiting for ${hl(t.buyer_handle)} to complete payment…</span>`;
+  } else if (!disputed && !complete) {
     if (isSeller && !t.seller_sent) {
       actionBtn = `<button class="btn gold" onclick="markSent()">Mark ticket as sent</button>`;
     } else if (isBuyer && t.seller_sent && !t.buyer_received) {
@@ -1117,6 +1139,137 @@ async function removeFriendFromList(handle) {
   render();
 }
 
+// ===== PAY TRADE (Phase 2 — Stripe Elements checkout) =====
+// Lazy-load Stripe.js from the CDN if the script tag wasn't added to index.html.
+// Falls back to loading from the CDN at runtime — keeps index.html changes optional.
+function ensureStripeJsLoaded() {
+  if (window.Stripe) return Promise.resolve();
+  if (window._stripeLoading) return window._stripeLoading;
+  window._stripeLoading = new Promise((resolve, reject) => {
+    const s = document.createElement('script');
+    s.src = 'https://js.stripe.com/v3/';
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('Could not load Stripe.js'));
+    document.head.appendChild(s);
+  });
+  return window._stripeLoading;
+}
+
+async function getStripePublishableKey() {
+  if (store._stripePublishableKey) return store._stripePublishableKey;
+  const r = await api('/stripe/config');
+  store._stripePublishableKey = r.publishable_key;
+  return r.publishable_key;
+}
+
+function payTradePage() {
+  if (!requireAuth()) return '';
+  const p = store._payTrade;
+  if (!p) return `${headerHTML()}<div class="sub-page"><h2>Complete your payment</h2><p style="color:var(--muted);margin-top:14px">Loading payment details…</p></div>`;
+  if (p.error) return `${headerHTML()}<div class="sub-page"><h2>Complete your payment</h2>
+    <p style="color:var(--red);margin-top:14px">${p.error}</p>
+    <button class="btn ghost" onclick="go('myTickets')">Back to My Tickets</button></div>`;
+  if (p.payment_status === 'paid') return `${headerHTML()}<div class="sub-page"><h2>Payment received</h2>
+    <p style="margin-top:14px">✓ This trade has already been paid.</p>
+    <button class="btn gold" onclick="go('wallet',{tradeId:${p.trade_id}})">Open trade</button></div>`;
+  if (p.expired || p.payment_status === 'canceled') return `${headerHTML()}<div class="sub-page"><h2>Payment window expired</h2>
+    <p style="margin-top:14px;color:var(--muted)">The seller's listing is available again. You can make a new offer if you'd like.</p>
+    <button class="btn ghost" onclick="go('myTickets')">Back to My Tickets</button></div>`;
+
+  const amount = (p.amount_cents || 0) / 100;
+  const expiresAt = p.window_expires_at ? Date.parse(p.window_expires_at) : null;
+  const secondsLeft = expiresAt ? Math.max(0, Math.floor((expiresAt - Date.now()) / 1000)) : null;
+  const mm = secondsLeft != null ? String(Math.floor(secondsLeft / 60)).padStart(2,'0') : '--';
+  const ss = secondsLeft != null ? String(secondsLeft % 60).padStart(2,'0') : '--';
+
+  // Mount Stripe Elements after the HTML renders. Use setTimeout to run after innerHTML assignment.
+  setTimeout(() => mountStripeCheckout(p), 0);
+
+  return `${headerHTML()}<div class="sub-page">
+    <h2>Complete your payment</h2>
+    <span class="mono">Trade #${p.trade_id} · ${fmt(amount)}</span>
+    <div class="panel" style="max-width:520px;margin-top:20px">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Enter your card details below. Funds will be held in escrow until you confirm receipt of the ticket.</p>
+      <p style="font-size:13px;margin-bottom:14px">Time remaining: <strong id="pay-timer">${mm}:${ss}</strong></p>
+      <div id="payment-element" style="margin:14px 0"></div>
+      <div id="payment-error" style="color:var(--red);font-size:13px;margin-bottom:10px;display:none"></div>
+      <div class="actions">
+        <button class="btn gold" id="pay-submit" onclick="submitStripePayment()">Pay ${fmt(amount)}</button>
+        <button class="btn ghost" onclick="cancelStripePayment()" style="border-color:var(--red);color:var(--red)">Cancel payment</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+let _stripeElements = null;
+let _stripeInstance = null;
+
+async function mountStripeCheckout(p) {
+  try {
+    await ensureStripeJsLoaded();
+    const pk = await getStripePublishableKey();
+    if (!pk) throw new Error('Stripe not configured on server.');
+    _stripeInstance = window.Stripe(pk);
+    const elements = _stripeInstance.elements({
+      clientSecret: p.client_secret,
+      appearance: { theme: 'night' },
+    });
+    _stripeElements = elements;
+    const paymentElement = elements.create('payment');
+    const mount = document.getElementById('payment-element');
+    if (mount) paymentElement.mount('#payment-element');
+    // Countdown timer
+    if (store._payTimerId) clearInterval(store._payTimerId);
+    store._payTimerId = setInterval(() => {
+      const expiresAt = p.window_expires_at ? Date.parse(p.window_expires_at) : null;
+      if (!expiresAt) return;
+      const left = Math.max(0, Math.floor((expiresAt - Date.now()) / 1000));
+      const el = document.getElementById('pay-timer');
+      if (el) el.textContent = `${String(Math.floor(left/60)).padStart(2,'0')}:${String(left%60).padStart(2,'0')}`;
+      if (left <= 0) { clearInterval(store._payTimerId); if (el) el.textContent = 'Expired'; }
+    }, 1000);
+  } catch (e) {
+    console.error('mountStripeCheckout:', e);
+    const errEl = document.getElementById('payment-error');
+    if (errEl) { errEl.textContent = 'Could not load payment form: ' + e.message; errEl.style.display = 'block'; }
+  }
+}
+
+async function submitStripePayment() {
+  const errEl = document.getElementById('payment-error');
+  const btn = document.getElementById('pay-submit');
+  if (!_stripeInstance || !_stripeElements) return;
+  if (errEl) errEl.style.display = 'none';
+  if (btn) { btn.disabled = true; btn.textContent = 'Processing…'; }
+  try {
+    const result = await _stripeInstance.confirmPayment({
+      elements: _stripeElements,
+      confirmParams: { return_url: window.location.origin },
+      redirect: 'if_required',
+    });
+    if (result.error) throw new Error(result.error.message);
+    // Confirmed — tell backend to sync state + notify seller.
+    const tradeId = store._payTrade.trade_id;
+    await api('/trades/' + tradeId + '/confirm-payment', { method: 'POST' });
+    if (store._payTimerId) clearInterval(store._payTimerId);
+    alert('✓ Payment complete. The seller has been notified and will transfer your ticket next.');
+    go('wallet', { tradeId });
+  } catch (e) {
+    if (errEl) { errEl.textContent = e.message; errEl.style.display = 'block'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Pay now'; }
+  }
+}
+
+async function cancelStripePayment() {
+  if (!confirm('Cancel this payment? The seller\'s listing will be available again.')) return;
+  const tradeId = store._payTrade.trade_id;
+  try { await api('/trades/' + tradeId + '/cancel-payment', { method: 'POST' }); }
+  catch (e) { alert('Could not cancel: ' + e.message); return; }
+  if (store._payTimerId) clearInterval(store._payTimerId);
+  store._payTrade = null;
+  go('myTickets');
+}
+
 // ===== WALLET POLLING (Step 8d) =====
 async function pollWalletTrade() {
   if (store.route !== 'wallet') return;
@@ -1421,6 +1574,7 @@ const routes = {
   home: homePage, browse: browsePage,
   signup: signupPage, login: loginPage, checkout: checkoutPage,
   forgotPassword: forgotPasswordPage, resetPassword: resetPasswordPage,
+  payTrade: payTradePage,
   postTickets: postTicketsPage, myTickets: myTicketsPage,
   wallet: walletPage, reviews: reviewsPage,
   profile: profilePage, editProfile: editProfilePage,
