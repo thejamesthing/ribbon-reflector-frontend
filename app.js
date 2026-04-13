@@ -312,7 +312,8 @@ function loginPage() {
     <p class="lead">Welcome back.</p>
     <div class="field"><label>Email</label><input id="li-email" value="folkjam@fan.co"></div>
     <div class="field"><label>Password</label><input id="li-pw" type="password" value="••••••••"></div>
-    <button class="btn wide" onclick="doLogin()">Enter the Movement</button>
+    <a onclick="go('forgotPassword')" style="color:var(--orange);cursor:pointer;font-size:13px;display:block;margin:6px 0 14px">Forgot password?</a>
+        <button class="btn wide" onclick="doLogin()">Enter the Movement</button>
     <div class="auth-switch">New here? <a onclick="go('signup')">Create account</a></div>
   </div></div>`;
 }
@@ -1366,6 +1367,7 @@ function eventPage() {
 const routes = {
   home: homePage, browse: browsePage,
   signup: signupPage, login: loginPage, checkout: checkoutPage,
+  forgotPassword: forgotPasswordPage, resetPassword: resetPasswordPage,
   postTickets: postTicketsPage, myTickets: myTicketsPage,
   wallet: walletPage, reviews: reviewsPage,
   profile: profilePage, editProfile: editProfilePage,
@@ -1387,10 +1389,15 @@ function render() {
 async function handleInitialUrl() {
   try {
     const params = new URLSearchParams(window.location.search);
-    const token = params.get('verify');
-    if (token) {
+    const verifyToken = params.get('verify');
+    const resetToken = params.get('reset');
+    if (verifyToken) {
       window.history.replaceState({}, '', window.location.pathname);
-      await verifyEmailToken(token);
+      await verifyEmailToken(verifyToken);
+    } else if (resetToken) {
+      // Strip query, then route to the reset form so the token isn't exposed in further nav.
+      window.history.replaceState({}, '', window.location.pathname);
+      go('resetPassword', { token: resetToken });
     }
   } catch (e) {
     console.error('handleInitialUrl:', e);
@@ -1421,7 +1428,6 @@ async function resendVerification() {
   try {
     const r = await api('/auth/resend-verification', { method: 'POST' });
     if (r.already_verified) {
-      // Sync local state if backend disagrees with us.
       store.user.emailVerified = true;
       render();
       alert('✓ Already verified.');
@@ -1430,6 +1436,75 @@ async function resendVerification() {
     }
   } catch (e) {
     alert('Could not send email: ' + e.message);
+  }
+}
+
+// ===== PASSWORD RESET (Step 9b) =====
+function forgotPasswordPage() {
+  return `${headerHTML()}<div class="sub-page">
+    <h2>Reset your password</h2><span class="mono">We'll email you a link to choose a new one.</span>
+    <div class="panel" style="max-width:460px;margin-top:20px">
+      <div class="field"><label>Email</label><input id="fp-email" type="email" placeholder="you@example.com" autocomplete="email"></div>
+      <div class="actions" style="margin-top:14px">
+        <button class="btn gold" onclick="submitForgotPassword()">Send reset link</button>
+        <button class="btn ghost" onclick="go('login')">Back to sign in</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function submitForgotPassword() {
+  const email = $('#fp-email')?.value.trim();
+  if (!email) { alert('Please enter your email.'); return; }
+  try {
+    await api('/auth/forgot-password', { method: 'POST', body: { email } });
+  } catch (e) {
+    // Backend deliberately returns 200 even when no account exists — but if it did fail,
+    // still show a generic message so we don't leak which addresses are registered.
+    console.error('forgot-password:', e);
+  }
+  alert('If an account exists for ' + email + ', a reset link is on its way. Check your inbox (and spam folder).');
+  go('login');
+}
+
+function resetPasswordPage() {
+  const token = store.params.token || '';
+  if (!token) {
+    return `${headerHTML()}<div class="sub-page"><h2>Reset password</h2>
+      <p style="color:var(--muted);margin-top:14px">No reset token provided. Use the link from your reset email, or <a onclick="go('forgotPassword')" style="color:var(--orange);cursor:pointer">request a new one</a>.</p>
+    </div>`;
+  }
+  return `${headerHTML()}<div class="sub-page">
+    <h2>Choose a new password</h2><span class="mono">Almost done — pick something at least 8 characters.</span>
+    <div class="panel" style="max-width:460px;margin-top:20px">
+      <div class="field"><label>New password</label><input id="rp-pw" type="password" placeholder="At least 8 characters" autocomplete="new-password"></div>
+      <div class="field"><label>Confirm new password</label><input id="rp-pw2" type="password" autocomplete="new-password"></div>
+      <div class="actions" style="margin-top:14px">
+        <button class="btn gold" onclick="submitResetPassword()">Reset password</button>
+        <button class="btn ghost" onclick="go('login')">Cancel</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function submitResetPassword() {
+  const token = store.params.token;
+  const pw = $('#rp-pw')?.value || '';
+  const pw2 = $('#rp-pw2')?.value || '';
+  if (pw.length < 8) { alert('Password must be at least 8 characters.'); return; }
+  if (pw !== pw2) { alert('Passwords don\'t match.'); return; }
+  try {
+    const result = await api('/auth/reset-password/' + encodeURIComponent(token), { method: 'POST', body: { password: pw } });
+    // Backend auto-logs us in on success.
+    if (result.token) setToken(result.token);
+    try {
+      const me = await api('/me');
+      store.user = { handle: me.handle, email: me.email, isMember: !!me.is_member, memberUntil: me.member_until, emailVerified: !!me.email_verified };
+    } catch {}
+    alert('✓ Password reset. You\'re signed in.');
+    go('home');
+  } catch (e) {
+    alert('Could not reset password: ' + e.message + '\n\nThe link may have expired. Request a new one.');
   }
 }
 
