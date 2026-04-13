@@ -755,22 +755,25 @@ function bumpRating() {
   render();
 }
 
-function submitReview() {
+async function submitReview() {
   const text = $('#reviewText')?.value.trim() || 'Great trade — smooth and friendly.';
   const stars = store.reviewRating || 5;
   const t = store.activeTrade;
-  store.communityReviews.unshift({
-    author: store.user.handle, stars, text,
-  });
-  if (t) {
-    // Update the completed trade rating
-    const ct = store.completedTrades.find(x => x.id === t.id);
-    if (ct) ct.rating = stars;
+  if (!t) { alert('No active trade to review.'); return; }
+  if (stars < 1 || stars > 5) { alert('Pick a rating from 1 to 5.'); return; }
+  try {
+    await api('/reviews', { method:'POST', body:{ trade_id: t.id, stars, body: text } });
+  } catch (e) {
+    alert('Could not publish review: ' + e.message);
+    return;
   }
+  const ct = store.completedTrades.find(x => x.id === t.id);
+  if (ct) ct.rating = stars;
   store.activeTrade = null;
   store.reviewRating = 0;
+  store._profileData = null;
   alert('✓ Review published — thanks for keeping the community strong.');
-  go('myTickets', {tab:'completed'});
+  go('myTickets', { tab:'completed' });
 }
 
 // ===== USER PROFILE =====
