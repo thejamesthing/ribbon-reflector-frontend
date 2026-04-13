@@ -43,7 +43,7 @@ const store = {
   completedTrades: [
     {id:201,partner:'@marisol_k',gave:'Vampire Weekend · Fillmore',got:'Mitski · Radio City',date:'Mar 2026',rating:5},
   ],
-  activeTrade: null, // {id, stage, partner, mine, theirs, messages}
+  activeTrade: null, // backend trade row + {partner, messages, viewer_role}
   communityReviews: [
     {author:'@jordan_hifi',about:'@marisol_k',stars:5,text:'Traded Vampire Weekend lawn for Mitski orchestra. Escrow made it painless — we chatted for a day, transferred, done.'},
     {author:'@marisol_k',about:'@jordan_hifi',stars:5,text:'Face value only means no weird negotiation. You just find a fan going to a show you want, and offer something you\'ve got.'},
@@ -123,6 +123,24 @@ async function loadRouteData(route, params) {
         try {
           store._profileData = await api('/users/' + encodeURIComponent(handle));
         } catch { store._profileData = null; }
+      }
+    }
+    if (route === 'wallet' && store.user) {
+      // Pick the trade id from nav params, else stick with whatever's already loaded.
+      const tradeId = params?.tradeId || store.activeTrade?.id;
+      if (tradeId) {
+        try {
+          const trade = await api('/trades/' + tradeId);
+          let messages = [];
+          try { messages = await api('/trades/' + tradeId + '/messages'); } catch {}
+          // Derive `partner` for backward-compat with disputePage and the header pill.
+          trade.partner = trade.viewer_role === 'buyer' ? trade.seller_handle : trade.buyer_handle;
+          trade.messages = messages;
+          store.activeTrade = trade;
+        } catch (e) {
+          console.error('wallet trade fetch failed:', e);
+          store.activeTrade = null;
+        }
       }
     }
   } catch (e) { console.error('loadRouteData:', e); }
@@ -554,18 +572,20 @@ function openListing(id) {
 }
 
 // ===== TICKETWALLET (ESCROW) =====
+// Cash-mode flow: buyer was charged at offer-accept time, seller transfers the
+// ticket, buyer confirms, escrow releases. Stage is derived from backend flags.
 const TRADE_STAGES = [
-  { key:'offer',    label:'Offer sent' },
-  { key:'accepted', label:'Accepted & charged' },
-  { key:'sent',     label:'Tickets sent' },
-  { key:'received', label:'Received' },
+  { key:'held',     label:'Escrow held' },
+  { key:'sent',     label:'Seller sent ticket' },
+  { key:'received', label:'Buyer confirmed' },
+  { key:'complete', label:'Escrow released' },
 ];
-const ADVANCE_LABELS = [
-  'Lister accepts — charge cards',
-  'Mark my ticket as sent',
-  'Mark received — release payout',
-  'Leave a review →',
-];
+function tradeStage(t) {
+  if (t.status === 'complete') return 3;
+  if (t.buyer_received) return 2; // both flags true is handled by status==='complete' above
+  if (t.seller_sent)    return 1;
+  return 0;
+}
 
 function walletPage() {
   if (!requireAuth()) return '';
@@ -574,82 +594,133 @@ function walletPage() {
     return `${headerHTML()}<div class="sub-page"><h2>TicketWallet</h2><span class="mono">Escrow</span>
       ${emptyState('No active trade','When an offer is accepted, your escrow dashboard lands here.','View my offers','myTickets')}</div>`;
   }
-  const stage = t.stage;
+  const stage = tradeStage(t);
+  const isBuyer  = t.viewer_role === 'buyer';
+  const isSeller = t.viewer_role === 'seller';
+  const disputed = t.status === 'disputed';
+  const complete = t.status === 'complete';
+  const amount = (t.amount_cents || 0) / 100;
+
   const statusHTML = TRADE_STAGES.map((s,i) => {
     const cls = i < stage ? 'done' : i === stage ? 'active' : '';
     return `<div class="status-step ${cls}"><span class="mono">Step ${i+1}</span>${s.label}${i<stage?' ✓':''}</div>`;
   }).join('');
-  const msgsHTML = t.messages.map(m => `<div class="msg ${m.who}">${m.text}</div>`).join('');
-  const canAdvance = stage < 4 && !t.disputed;
+
+  const msgsHTML = (t.messages || []).map(m => {
+    const who = m.sender_handle === store.user.handle ? 'me' : 'them';
+    return `<div class="msg ${who}">${m.body}</div>`;
+  }).join('');
+
+  // Role-conditional action button. One-directional: seller acts first, then buyer.
+  let actionBtn = '';
+  if (!disputed && !complete) {
+    if (isSeller && !t.seller_sent) {
+      actionBtn = `<button class="btn gold" onclick="markSent()">Mark ticket as sent</button>`;
+    } else if (isBuyer && t.seller_sent && !t.buyer_received) {
+      actionBtn = `<button class="btn gold" onclick="markReceived()">Confirm I received the ticket</button>`;
+    } else if (isSeller && t.seller_sent && !t.buyer_received) {
+      actionBtn = `<span class="mono" style="color:var(--muted)">Waiting for ${hl(t.buyer_handle)} to confirm receipt…</span>`;
+    } else if (isBuyer && !t.seller_sent) {
+      actionBtn = `<span class="mono" style="color:var(--muted)">Waiting for ${hl(t.seller_handle)} to send the ticket…</span>`;
+    }
+  } else if (complete) {
+    actionBtn = `<button class="btn gold" onclick="go('reviews')">Leave a review →</button>`;
+  }
+
+  const escrowPanel = isBuyer
+    ? `<div class="panel"><h4>You paid</h4>
+        <p style="font-size:22px;font-weight:700">${fmt(amount)}</p>
+        <p style="color:var(--muted);font-size:13px;margin-top:6px">Held in escrow. Releases to ${hl(t.seller_handle)} once you confirm receipt.</p>
+      </div>`
+    : `<div class="panel"><h4>You'll receive</h4>
+        <p style="font-size:22px;font-weight:700">${fmt(amount)}</p>
+        <p style="color:var(--muted);font-size:13px;margin-top:6px">Held in escrow from ${hl(t.buyer_handle)}. Releases to you once they confirm receipt.</p>
+      </div>`;
+
   return `${headerHTML()}<div class="sub-page"><h2>TicketWallet</h2><span class="mono">Escrow · Trade #${t.id} · with ${hl(t.partner)}</span>
-    ${t.disputed ? `<div class="dispute-banner"><div class="icon">⚠️</div><div>
+    ${disputed ? `<div class="dispute-banner"><div class="icon">⚠️</div><div>
       <h4>Dispute open — escrow paused</h4>
-      <p>Reason: <strong>${t.disputeReason}</strong>. Our support team will reach out within 24 hours. Funds are held until the case is resolved.</p>
-    </div></div>` : `<div class="notice">Funds and tickets are held in escrow. Both cards were charged when the offer was accepted. Payout releases once both parties mark tickets received.</div>`}
+      <p>Our support team will reach out within 24 hours. Funds are held until the case is resolved.</p>
+    </div></div>` : `<div class="notice">${isBuyer ? 'Your card was charged when the offer was accepted. Funds release to the seller once you confirm the ticket arrived.' : 'Buyer was charged when you accepted the offer. Transfer the ticket, then payout releases once the buyer confirms receipt.'}</div>`}
     <div class="status">${statusHTML}</div>
     <div class="two-col">
-      <div class="panel"><h4>You're sending</h4>
-        <p style="font-size:17px;font-weight:600">${t.mine.artist}</p>
-        <p style="color:var(--muted);font-size:13px;margin-top:4px">${t.mine.venue} · ${t.mine.date}</p>
-        <p style="font-size:13px">${t.mine.seat}</p>
-        <p style="margin-top:10px">Face value: <strong>${fmt(t.mine.face)}</strong></p>
+      <div class="panel"><h4>${isBuyer ? "You're receiving" : "You're sending"}</h4>
+        <p style="font-size:17px;font-weight:600">${t.listing_artist}</p>
+        <p style="color:var(--muted);font-size:13px;margin-top:4px">${t.listing_venue}${t.listing_city ? ' · ' + t.listing_city : ''} · ${t.listing_date}</p>
+        <p style="font-size:13px">${t.listing_seat}</p>
+        <p style="margin-top:10px">Face value: <strong>${fmt(t.listing_face_value)}</strong></p>
       </div>
-      <div class="panel"><h4>You're receiving</h4>
-        <p style="font-size:17px;font-weight:600">${t.theirs.artist}</p>
-        <p style="color:var(--muted);font-size:13px;margin-top:4px">${t.theirs.venue} · ${t.theirs.date}</p>
-        <p style="font-size:13px">${t.theirs.seat}</p>
-        <p style="margin-top:10px">Face value: <strong>${fmt(t.theirs.face)}</strong></p>
-      </div>
+      ${escrowPanel}
     </div>
     <div class="panel" style="margin-top:20px"><h4>Chat with ${t.partner}</h4>
       <div id="msgs">${msgsHTML}</div>
       <div class="chat-input"><input id="chatInput" placeholder="Write a message..." onkeydown="if(event.key==='Enter')sendMsg()"><button class="btn" onclick="sendMsg()">Send</button></div>
     </div>
     <div class="actions">
-      ${canAdvance ? `<button class="btn gold" onclick="advanceTrade()">${ADVANCE_LABELS[stage]}</button>` : ''}
+      ${actionBtn}
       <button class="btn ghost" onclick="go('myTickets')">Back to My Tickets</button>
-      ${stage < 3 ? `<button class="btn ghost" onclick="cancelTrade()" style="margin-left:auto;border-color:var(--red);color:var(--red)">Dispute / cancel</button>` : ''}
+      ${!complete && !disputed ? `<button class="btn ghost" onclick="cancelTrade()" style="margin-left:auto;border-color:var(--red);color:var(--red)">Dispute / cancel</button>` : ''}
     </div>
   </div>`;
 }
 
-function sendMsg() {
+async function sendMsg() {
   const input = $('#chatInput');
   const v = input?.value.trim();
   if (!v || !store.activeTrade) return;
-  store.activeTrade.messages.push({ who:'me', text:v });
-  // Fake a reply after a beat
-  setTimeout(() => {
-    if (!store.activeTrade) return;
-    store.activeTrade.messages.push({ who:'them', text:'Got it 🎟️' });
-    if (store.route === 'wallet') render();
-  }, 900);
+  const t = store.activeTrade;
+  // Optimistic append so the input clears and the user sees their message immediately.
+  t.messages = t.messages || [];
+  t.messages.push({ sender_handle: store.user.handle, body: v });
+  input.value = '';
   render();
+  try {
+    await api(`/trades/${t.id}/messages`, { method:'POST', body:{ body:v } });
+    // Refetch authoritative list so we get server ids/timestamps + any inbound replies.
+    try { t.messages = await api(`/trades/${t.id}/messages`); } catch {}
+  } catch (e) {
+    alert('Could not send message: ' + e.message);
+  }
+  if (store.route === 'wallet') render();
 }
 
-function advanceTrade() {
+async function markSent() {
   const t = store.activeTrade;
   if (!t) return;
-  if (t.stage < 3) {
-    t.stage++;
-    if (t.stage === 2) {
-      t.messages.push({ who:'them', text:'Just marked mine sent too — check your venue app!' });
-      addNotification('✈️', `Tickets marked as sent for trade <strong>${t.id}</strong>.`, 'wallet');
-    }
-    if (t.stage === 3) {
-      addNotification('📬', `Tickets received for trade <strong>${t.id}</strong>.`, 'wallet');
-    }
+  try {
+    const updated = await api(`/trades/${t.id}/mark-sent`, { method:'POST' });
+    Object.assign(t, updated);
+    t.partner = t.viewer_role === 'buyer' ? t.seller_handle : t.buyer_handle;
+    addNotification('✈️', `You marked the ticket sent for trade <strong>${t.id}</strong>.`, 'wallet');
     render();
-  } else {
-    // Trade complete → move to completed, go to reviews
-    t.stage = 4;
-    store.completedTrades.unshift({
-      id: t.id, partner: t.partner,
-      gave: `${t.mine.artist} · ${t.mine.venue}`,
-      got: `${t.theirs.artist} · ${t.theirs.venue}`,
-      date: 'Apr 2026', rating: 0,
-    });
-    go('reviews');
+  } catch (e) {
+    alert('Could not mark sent: ' + e.message);
+  }
+}
+
+async function markReceived() {
+  const t = store.activeTrade;
+  if (!t) return;
+  try {
+    const updated = await api(`/trades/${t.id}/mark-received`, { method:'POST' });
+    Object.assign(t, updated);
+    t.partner = t.viewer_role === 'buyer' ? t.seller_handle : t.buyer_handle;
+    if (updated.status === 'complete') {
+      // Server released escrow; mirror into completed list and head to reviews.
+      store.completedTrades.unshift({
+        id: t.id, partner: t.partner,
+        gave: t.viewer_role === 'seller' ? `${t.listing_artist} · ${t.listing_venue}` : `${fmt((t.amount_cents||0)/100)} (cash)`,
+        got:  t.viewer_role === 'buyer'  ? `${t.listing_artist} · ${t.listing_venue}` : `${fmt((t.amount_cents||0)/100)} (cash)`,
+        date: 'Apr 2026', rating: 0,
+      });
+      addNotification('✓', `Trade <strong>${t.id}</strong> complete — escrow released.`, 'reviews');
+      go('reviews');
+    } else {
+      addNotification('📬', `You confirmed receipt for trade <strong>${t.id}</strong>.`, 'wallet');
+      render();
+    }
+  } catch (e) {
+    alert('Could not confirm receipt: ' + e.message);
   }
 }
 
