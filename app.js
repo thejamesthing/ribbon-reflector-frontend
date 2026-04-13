@@ -474,7 +474,7 @@ if (tab === 'incoming') {
           ${noteHTML}
         </div>
         <div style="display:flex;gap:8px">
-          <button class="btn sm" disabled title="Accept flow ships next session">Accept</button>
+          <button class="btn sm" onclick="acceptIncoming(${o.id})">Accept</button>
           <button class="btn sm ghost" onclick="declineIncoming(${o.id})">Decline</button>
         </div>
       </div>`;
@@ -511,9 +511,20 @@ function emptyState(title, sub, btnLabel, btnRoute) {
   return `<div class="empty"><h3>${title}</h3><p>${sub}</p>${btnLabel?`<button class="btn" style="margin-top:18px" onclick="go('${btnRoute}')">${btnLabel}</button>`:''}</div>`;
 }
 
-function acceptIncoming(id) {
-  // Accept flow ships in Session C. Button is disabled in the UI; this is a no-op safety net.
-  console.warn('acceptIncoming called but accept flow is not yet wired');
+async function acceptIncoming(id) {
+  if (!confirm('Accept this offer? You will need to send the ticket through the wallet next.')) return;
+  let result;
+  try {
+    result = await api(`/offers/${id}/accept`, { method: 'POST' });
+  } catch (e) {
+    alert('Could not accept offer: ' + e.message);
+    return;
+  }
+  // Refetch incoming offers so the accepted (and any auto-declined siblings) drop off the list.
+  try { store.incomingOffers = await api('/offers/incoming'); } catch { store.incomingOffers = []; }
+  // Navigate to the wallet view for this trade. walletPage gets rebuilt in Step 6;
+  // for now this hands off the trade_id we got back so the next step has it ready.
+  go('wallet', { tradeId: result.trade_id });
 }
 
 async function declineIncoming(id) {
