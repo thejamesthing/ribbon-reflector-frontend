@@ -126,14 +126,12 @@ async function loadRouteData(route, params) {
       }
     }
     if (route === 'wallet' && store.user) {
-      // Pick the trade id from nav params, else stick with whatever's already loaded.
       const tradeId = params?.tradeId || store.activeTrade?.id;
       if (tradeId) {
         try {
           const trade = await api('/trades/' + tradeId);
           let messages = [];
           try { messages = await api('/trades/' + tradeId + '/messages'); } catch {}
-          // Derive `partner` for backward-compat with disputePage and the header pill.
           trade.partner = trade.viewer_role === 'buyer' ? trade.seller_handle : trade.buyer_handle;
           trade.messages = messages;
           store.activeTrade = trade;
@@ -142,11 +140,25 @@ async function loadRouteData(route, params) {
           store.activeTrade = null;
         }
       }
+      if (!store._walletPollId) {
+        store._walletPollId = setInterval(pollWalletTrade, 8000);
+      }
+    }
+    if (route === 'friends' && store.user) {
+      try { store._friendsData = await api('/friends'); }
+      catch (e) { console.error('friends fetch failed:', e); store._friendsData = { friends:[], incoming:[], outgoing:[] }; }
+    }
+    if (route === 'editProfile' && store.user) {
+      try { store._meData = await api('/me'); } catch { store._meData = null; }
     }
   } catch (e) { console.error('loadRouteData:', e); }
 }
 
 async function go(route, params) {
+  if (store._walletPollId && route !== 'wallet') {
+    clearInterval(store._walletPollId);
+    store._walletPollId = null;
+  }
   store.route = route;
   store.params = params || {};
   render();
@@ -799,6 +811,20 @@ function profilePage() {
   const isMe = handle === store.user?.handle;
   const friendsCount = remote?.friends_count ?? 0;
   const fStatus = remote?.friendship_status || (isMe ? 'self' : 'none');
+  const avatarUrl = remote?.user?.avatar_data_url;
+  const avatarHTML = avatarUrl
+    ? `<div class="profile-avatar" style="background-image:url('${avatarUrl}');background-size:cover;background-position:center;color:transparent">.</div>`
+    : `<div class="profile-avatar">${initial}</div>`;
+  const city = remote?.user?.city || '';
+  const region = remote?.user?.region || '';
+  const location = [city, region].filter(Boolean).join(', ');
+  const linkRaw = remote?.user?.link || '';
+  let linkHTML = '';
+  if (linkRaw) {
+    const href = /^https?:\/\//i.test(linkRaw) ? linkRaw : 'https://' + linkRaw;
+    const display = linkRaw.replace(/^https?:\/\//i, '');
+    linkHTML = ` · <a href="${href}" target="_blank" rel="noopener noreferrer" style="color:var(--orange)">${display}</a>`;
+  }
   let friendBtn = '';
   if (store.user && !isMe) {
     if (fStatus === 'friends') {
@@ -812,21 +838,26 @@ function profilePage() {
       friendBtn = `<button class="btn gold" onclick="addFriend('${handle}')">+ Add friend</button>`;
     }
   }
+  const friendsStat = isMe
+    ? `<div class="stat" style="cursor:pointer" onclick="go('friends')"><span class="num">${friendsCount}</span><span class="lbl">Friends ›</span></div>`
+    : `<div class="stat"><span class="num">${friendsCount}</span><span class="lbl">Friends</span></div>`;
+  const editBtn = isMe ? `<button class="btn ghost" onclick="go('editProfile')">Edit profile</button>` : '';
 
   return `${headerHTML()}<div class="sub-page">
     <div class="profile-hero">
-      <div class="profile-avatar">${initial}</div>
+      ${avatarHTML}
       <div class="profile-meta">
         <h1>${handle}</h1>
-        <div class="handle-sub">Member since ${profile.joined} · ${profile.bio}</div>
+        <div class="handle-sub">Member since ${profile.joined}${location ? ' · ' + location : ''}${linkHTML}</div>
+        <p style="margin-top:10px;max-width:560px">${profile.bio}</p>
         <div class="stat-row">
           <div class="stat"><span class="num">${userListings.length}</span><span class="lbl">Active listings</span></div>
           <div class="stat"><span class="num">${totalTrades}</span><span class="lbl">Total trades</span></div>
           <div class="stat"><span class="num">${avgStars ? avgStars.toFixed(1) : '—'}</span><span class="lbl">Avg rating</span></div>
           <div class="stat"><span class="num">${reviewsAbout.length}</span><span class="lbl">Reviews received</span></div>
-          <div class="stat"><span class="num">${friendsCount}</span><span class="lbl">Friends</span></div>
+          ${friendsStat}
         </div>
-        ${friendBtn ? `<div class="actions" style="margin-top:14px">${friendBtn}</div>` : ''}
+        ${(friendBtn || editBtn) ? `<div class="actions" style="margin-top:14px">${friendBtn}${editBtn}</div>` : ''}
         <div class="trust-bar">
           <div class="trust-track"><div class="trust-fill" style="width:${trustPct}%"></div></div>
           <div class="trust-label">Trust score: ${trustPct}%</div>
@@ -882,6 +913,166 @@ async function removeFriend(handle) {
   try { await api('/friends/' + encodeURIComponent(handle), { method:'DELETE' }); }
   catch (e) { alert('Could not update friendship: ' + e.message); return; }
   await refetchProfile(handle);
+}
+
+// ===== EDIT PROFILE (Step 8a) =====
+function editProfilePage() {
+  if (!requireAuth()) return '';
+  const me = store._meData || {};
+  return `${headerHTML()}<div class="sub-page">
+    <h2>Edit profile</h2><span class="mono">${store.user.handle}</span>
+    <div class="panel" style="max-width:620px;margin-top:20px">
+      <div class="field">
+        <label>Profile picture</label>
+        <div style="display:flex;align-items:center;gap:14px;margin-top:6px">
+          <div id="ep-avatar-preview" style="width:72px;height:72px;border-radius:50%;background:var(--panel);background-size:cover;background-position:center;${me.avatar_data_url ? `background-image:url('${me.avatar_data_url}')` : ''}"></div>
+          <input id="ep-avatar-file" type="file" accept="image/*">
+          ${me.avatar_data_url ? `<button class="btn ghost" type="button" onclick="clearAvatar()">Remove</button>` : ''}
+        </div>
+        <p style="color:var(--muted);font-size:12px;margin-top:6px">PNG/JPG, resized to 256px on save.</p>
+      </div>
+      <div class="field">
+        <label>Bio (max 500 chars)</label>
+        <textarea id="ep-bio" maxlength="500" placeholder="Tell other fans who you are.">${me.bio || ''}</textarea>
+      </div>
+      <div class="field">
+        <label>Link (website, social, etc.)</label>
+        <input id="ep-link" value="${me.link || ''}" placeholder="instagram.com/yourhandle" maxlength="200">
+      </div>
+      <div class="two-col">
+        <div class="field">
+          <label>City</label>
+          <input id="ep-city" value="${me.city || ''}" placeholder="Brooklyn" maxlength="80">
+        </div>
+        <div class="field">
+          <label>State / Region</label>
+          <input id="ep-region" value="${me.region || ''}" placeholder="NY" maxlength="80">
+        </div>
+      </div>
+      <div class="actions" style="margin-top:14px">
+        <button class="btn gold" onclick="saveProfile()">Save changes</button>
+        <button class="btn ghost" onclick="go('profile',{handle:store.user.handle})">Cancel</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+async function fileToAvatarDataUrl(file, maxDim = 256) {
+  const blobUrl = URL.createObjectURL(file);
+  try {
+    const img = await new Promise((res, rej) => {
+      const im = new Image();
+      im.onload = () => res(im);
+      im.onerror = () => rej(new Error('could not read image'));
+      im.src = blobUrl;
+    });
+    const scale = Math.min(maxDim / img.width, maxDim / img.height, 1);
+    const w = Math.max(1, Math.round(img.width * scale));
+    const h = Math.max(1, Math.round(img.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    return canvas.toDataURL('image/jpeg', 0.85);
+  } finally {
+    URL.revokeObjectURL(blobUrl);
+  }
+}
+
+function clearAvatar() {
+  store._clearAvatar = true;
+  const prev = $('#ep-avatar-preview');
+  if (prev) prev.style.backgroundImage = 'none';
+  alert('Avatar will be removed when you click Save.');
+}
+
+async function saveProfile() {
+  if (!requireAuth()) return;
+  const body = {
+    bio:    $('#ep-bio')?.value ?? '',
+    link:   $('#ep-link')?.value.trim() ?? '',
+    city:   $('#ep-city')?.value.trim() ?? '',
+    region: $('#ep-region')?.value.trim() ?? '',
+  };
+  const file = $('#ep-avatar-file')?.files?.[0];
+  if (file) {
+    try { body.avatar_data_url = await fileToAvatarDataUrl(file); }
+    catch (e) { alert('Could not process image: ' + e.message); return; }
+  } else if (store._clearAvatar) {
+    body.avatar_data_url = '';
+  }
+  try {
+    const updated = await api('/me', { method:'PATCH', body });
+    store._profileData = null;
+    store._meData = updated;
+    store._clearAvatar = false;
+    alert('✓ Profile saved.');
+    go('profile', { handle: store.user.handle });
+  } catch (e) {
+    alert('Could not save profile: ' + e.message);
+  }
+}
+
+// ===== FRIENDS LIST PAGE (Step 8b) =====
+function friendsPage() {
+  if (!requireAuth()) return '';
+  const data = store._friendsData || { friends:[], incoming:[], outgoing:[] };
+  const card = (f, actionsHTML) => `<div class="review-card" style="display:flex;justify-content:space-between;align-items:center;gap:12px">
+    <div><strong>${hl(f.handle)}</strong></div>
+    <div style="display:flex;gap:8px">${actionsHTML}</div>
+  </div>`;
+  const incomingHTML = data.incoming.length
+    ? data.incoming.map(f => card(f, `
+        <button class="btn gold" onclick="acceptFriendFromList('${f.handle}')">Accept</button>
+        <button class="btn ghost" onclick="removeFriendFromList('${f.handle}')">Decline</button>`)).join('')
+    : `<p style="color:var(--muted)">No incoming requests.</p>`;
+  const outgoingHTML = data.outgoing.length
+    ? data.outgoing.map(f => card(f, `<button class="btn ghost" onclick="removeFriendFromList('${f.handle}')">Cancel request</button>`)).join('')
+    : `<p style="color:var(--muted)">No outgoing requests.</p>`;
+  const friendsHTML = data.friends.length
+    ? data.friends.map(f => card(f, `<button class="btn ghost" onclick="removeFriendFromList('${f.handle}')">Unfriend</button>`)).join('')
+    : `<p style="color:var(--muted)">You haven't added any friends yet. Visit a profile and tap <strong>+ Add friend</strong>.</p>`;
+  return `${headerHTML()}<div class="sub-page">
+    <h2>Friends</h2><span class="mono">${data.friends.length} friend${data.friends.length===1?'':'s'} · ${data.incoming.length} pending</span>
+    ${data.incoming.length ? `<div class="profile-section"><h3>Pending requests</h3>${incomingHTML}</div>` : ''}
+    <div class="profile-section"><h3>Your friends</h3>${friendsHTML}</div>
+    ${data.outgoing.length ? `<div class="profile-section"><h3>Sent requests</h3>${outgoingHTML}</div>` : ''}
+  </div>`;
+}
+
+async function acceptFriendFromList(handle) {
+  try { await api('/friends/' + encodeURIComponent(handle) + '/accept', { method:'POST' }); }
+  catch (e) { alert('Could not accept: ' + e.message); return; }
+  try { store._friendsData = await api('/friends'); } catch {}
+  render();
+}
+async function removeFriendFromList(handle) {
+  if (!confirm('Remove this friendship / request?')) return;
+  try { await api('/friends/' + encodeURIComponent(handle), { method:'DELETE' }); }
+  catch (e) { alert('Could not update: ' + e.message); return; }
+  try { store._friendsData = await api('/friends'); } catch {}
+  render();
+}
+
+// ===== WALLET POLLING (Step 8d) =====
+async function pollWalletTrade() {
+  if (store.route !== 'wallet') return;
+  const t = store.activeTrade;
+  if (!t) return;
+  try {
+    const trade = await api('/trades/' + t.id);
+    let messages = [];
+    try { messages = await api('/trades/' + t.id + '/messages'); } catch {}
+    trade.partner = trade.viewer_role === 'buyer' ? trade.seller_handle : trade.buyer_handle;
+    trade.messages = messages;
+    const changed = trade.status !== t.status
+      || trade.seller_sent !== t.seller_sent
+      || trade.buyer_received !== t.buyer_received
+      || (trade.messages.length || 0) !== (t.messages?.length || 0);
+    store.activeTrade = trade;
+    if (changed && store.route === 'wallet') render();
+  } catch {
+    // silent
+  }
 }
 
 // ===== NOTIFICATIONS =====
@@ -979,24 +1170,39 @@ function bindDisputeEvents() {
 
 function selectReason(key) { store.dispute.reason = key; render(); }
 
-function submitDispute() {
+async function submitDispute() {
   const d = store.dispute;
   const details = $('#d-details')?.value || d.details;
   if (!d.reason) { alert('Please select a reason for the dispute.'); return; }
   if (!details.trim()) { alert('Please describe the issue.'); return; }
   const t = store.activeTrade;
+  if (!t) { alert('No active trade to dispute.'); return; }
   const reasonLabel = DISPUTE_REASONS.find(r => r.key === d.reason).label;
+  try {
+    await api(`/trades/${t.id}/dispute`, { method:'POST', body:{
+      reason: d.reason,
+      details,
+      evidence_filename: d.evidence?.name || null,
+    }});
+  } catch (e) {
+    alert('Could not submit dispute: ' + e.message);
+    return;
+  }
   store.disputes.unshift({
     id: 'D-' + store.nextId++, tradeId: t.id, partner: t.partner,
     reason: reasonLabel, details, evidence: d.evidence,
     status: 'open', filedAt: 'Just now',
   });
-  // Flag the active trade as disputed
-  t.disputed = true;
-  t.disputeReason = reasonLabel;
-  // Notify
-  addNotification('⚠️', `Dispute filed for trade <strong>${t.id}</strong>. Support will reach out within 24 hours.`, 'wallet');
-  // Reset dispute form
+  try {
+    const trade = await api('/trades/' + t.id);
+    trade.partner = trade.viewer_role === 'buyer' ? trade.seller_handle : trade.buyer_handle;
+    trade.messages = t.messages || [];
+    store.activeTrade = trade;
+  } catch {
+    t.status = 'disputed';
+    t.disputed = true;
+    t.disputeReason = reasonLabel;
+  }
   store.dispute = { reason:'', details:'', evidence:null };
   alert('Dispute submitted. Escrow is paused. You\'ll hear from our team within 24 hours.');
   go('wallet');
@@ -1152,7 +1358,9 @@ const routes = {
   signup: signupPage, login: loginPage, checkout: checkoutPage,
   postTickets: postTicketsPage, myTickets: myTicketsPage,
   wallet: walletPage, reviews: reviewsPage,
-  profile: profilePage, dispute: disputePage,
+  profile: profilePage, editProfile: editProfilePage,
+  friends: friendsPage,
+  dispute: disputePage,
   composeOffer: composeOfferPage, event: eventPage,
 };
 
