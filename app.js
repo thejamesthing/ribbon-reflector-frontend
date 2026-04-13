@@ -1394,10 +1394,11 @@ async function handleInitialUrl() {
     if (verifyToken) {
       window.history.replaceState({}, '', window.location.pathname);
       await verifyEmailToken(verifyToken);
+      return false;
     } else if (resetToken) {
-      // Strip query, then route to the reset form so the token isn't exposed in further nav.
       window.history.replaceState({}, '', window.location.pathname);
-      go('resetPassword', { token: resetToken });
+      await go('resetPassword', { token: resetToken });
+      return true;
     }
   } catch (e) {
     console.error('handleInitialUrl:', e);
@@ -1509,5 +1510,7 @@ async function submitResetPassword() {
 }
 
 // On initial load, check for a verification token in the URL, then route.
-handleInitialUrl();
-go('home');
+(async () => {
+  const handled = await handleInitialUrl();
+  if (!handled) go('home');
+})();
