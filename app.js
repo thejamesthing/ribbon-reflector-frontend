@@ -552,11 +552,21 @@ if (tab === 'incoming') {
     if (!store.outgoingOffers.length) return emptyState('No outgoing offers','Browse listings and make your first offer.','Browse listings','browse');
     return store.outgoingOffers.map(o => {
       const amt = (o.amount_cents / 100).toFixed(2);
-      const statusPill = o.status === 'pending'
-        ? `<span class="pill orange">Awaiting response</span>`
-        : o.status === 'accepted'
-        ? `<span class="pill">Accepted</span>`
-        : `<span class="pill" style="opacity:0.6">${o.status}</span>`;
+      // If the offer was accepted AND the trade needs payment, surface a Pay Now button.
+      const needsPayment = o.status === 'accepted' && o.trade_id && o.trade_payment_status === 'pending';
+      const isPaid = o.trade_payment_status === 'paid';
+      let statusPill;
+      if (o.status === 'pending') {
+        statusPill = `<span class="pill orange">Awaiting response</span>`;
+      } else if (needsPayment) {
+        statusPill = `<button class="btn gold" onclick="go('payTrade',{tradeId:${o.trade_id}})">Pay now</button>`;
+      } else if (isPaid) {
+        statusPill = `<button class="btn ghost" onclick="go('wallet',{tradeId:${o.trade_id}})">View trade</button>`;
+      } else if (o.status === 'accepted') {
+        statusPill = `<span class="pill">Accepted</span>`;
+      } else {
+        statusPill = `<span class="pill" style="opacity:0.6">${o.status}</span>`;
+      }
       return `<div class="list-row">
         <div class="info">
           <h4>Offered <strong>$${amt}</strong> to ${hl('@' + o.to_handle)}</h4>
