@@ -24,6 +24,8 @@ function mapListing(l) {
     date: l.event_date, seat: l.seat, qty: l.qty, face: l.face_value,
     owner: l.owner_handle || l.owner, status: l.status,
     receipt: l.receipt_filename, notes: l.notes,
+    activeTradeId: l.active_trade_id || null,
+    activeTradePaymentStatus: l.active_trade_payment_status || null,
   };
 }
 
@@ -239,9 +241,15 @@ function homePage() {
 }
 
 function cardHTML(t) {
+  // Seller view: if this listing is mid-trade, show an Open-trade action that stops the card click.
+  const isOwner = store.user?.handle === t.owner;
+  const tradedWithActive = t.status === 'traded' && t.activeTradeId;
   const statusPill = {
     active:'<span class="pill green">Active</span>',
     pending:'<span class="pill orange">Offer Pending</span>',
+    traded: tradedWithActive && isOwner
+      ? `<button class="btn gold" onclick="event.stopPropagation();go('wallet',{tradeId:${t.activeTradeId}})">Open trade</button>`
+      : '<span class="pill blue">Traded</span>',
     sold:'<span class="pill blue">Traded</span>',
   }[t.status] || '<span class="pill gray">Available</span>';
   const key = eventKey(t);
