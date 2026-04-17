@@ -96,6 +96,7 @@ async function loadRouteData(route, params) {
           isMember: !!me.is_member, memberUntil: me.member_until,
           emailVerified: !!me.email_verified,
           stripeStatus: me.stripe_account_status || 'none',
+          avatarUrl: me.avatar_data_url || null,
         };
       } catch {}
     }
@@ -210,7 +211,7 @@ function headerHTML() {
       <a onclick="go('howItWorks')">How It Works</a>
       <div class="icon-btn bell-wrap" onclick="toggleNotifs()" title="Notifications">🔔${store.user && unreadCount() ? `<span class="bell-badge">${unreadCount()}</span>`:''}</div>
       ${store.user
-        ? `<div class="avatar" onclick="go('profile',{handle:'${store.user.handle}'})" title="${store.user.handle}"></div>
+        ? `<div class="avatar" onclick="go('profile',{handle:'${store.user.handle}'})" title="${store.user.handle}" ${store.user.avatarUrl ? `style="background-image:url('${store.user.avatarUrl}');background-size:cover;background-position:center"` : ''}></div>
            <a onclick="doLogout()" style="font-size:13px;opacity:0.7">Sign out</a>
            <button class="post-btn" onclick="go('postTickets')">Post Tickets</button>`
         : `<a onclick="go('login')">Sign in</a>
