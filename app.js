@@ -33,12 +33,7 @@ function mapListing(l) {
 const store = {
   user: null, // {email, handle, isMember, memberUntil}
   route: 'home',
-  listings: [
-    {id:1,owner:'@marisol_k',artist:'Phish',venue:'Hampton Coliseum',city:'Hampton, VA',date:'Sep 20, 2026',seat:'GA Floor',face:120,qty:1,status:'active',receipt:'ticketmaster_receipt.pdf'},
-    {id:2,owner:'@jordan_hifi',artist:'Phish',venue:'Madison Square Garden',city:'New York, NY',date:'Dec 28, 2026',seat:'Sec 114 Row 8',face:250,qty:1,status:'active',receipt:'axs_order.pdf'},
-    {id:3,owner:'@peach.pit',artist:'Goose',venue:'Radio City Music Hall',city:'New York, NY',date:'Oct 9, 2026',seat:'Orch Row M',face:185,qty:1,status:'active',receipt:'ticketmaster.pdf'},
-    {id:4,owner:'@ssun.room',artist:'King Gizzard & The Lizard Wizard',venue:'The Rady Shell',city:'San Diego, CA',date:'Aug 11, 2026',seat:'Sec MARLFT',face:165,qty:2,status:'active',receipt:'axs.pdf'},
-  ],
+  listings: [],
   myListings: [],
   incomingOffers: [],
   outgoingOffers: [],
@@ -53,13 +48,7 @@ const store = {
     {author:'@ssun.room',about:'@jordan_hifi',stars:4,text:'Smooth trade, took a day to coordinate but everything went through cleanly.'},
     {author:'@marisol_k',about:'@peach.pit',stars:5,text:'Great communicator, sent tickets same day. Fan community at its best.'},
   ],
-  profiles: {
-    '@marisol_k': { joined:'Mar 2024', shows:['Phish','Mitski','Goose','Vampire Weekend'], bio:'Following Phish up and down the east coast since \'19.' },
-    '@jordan_hifi': { joined:'Sep 2023', shows:['Vampire Weekend','Mitski','Fontaines D.C.'], bio:'Vinyl collector, indie concerts, hot takes.' },
-    '@peach.pit': { joined:'Jan 2025', shows:['Goose','Big Thief','Fleet Foxes'], bio:'NYC-based. Always down for a jam band trade.' },
-    '@ssun.room': { joined:'Jun 2024', shows:['King Gizzard','Mac DeMarco','Unknown Mortal Orchestra'], bio:'West coast psych rock enjoyer.' },
-    '@deadhead_42': { joined:'Nov 2022', shows:['Phish','Goose','Grateful Shred'], bio:'Lot scene lifer.' },
-  },
+  profiles: {},
   filters: { q:'', city:'', maxPrice:'', sort:'newest' },
   reviewRating: 0,
   notifications: [],
