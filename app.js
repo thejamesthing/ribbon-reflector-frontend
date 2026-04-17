@@ -201,11 +201,6 @@ function headerHTML() {
     <span>⚠️ Please verify your email to list tickets and make offers.</span>
     <a onclick="resendVerification()" style="text-decoration:underline;cursor:pointer;margin-left:10px">Resend email</a>
   </div>` : '';
-  const footer = `<footer style="text-align:center;padding:40px 20px 24px;font-size:12px;color:var(--muted);border-top:1px solid rgba(255,255,255,0.08);margin-top:60px">
-    <a href="http://remaininlight.com/ribbon-privacy.html" target="_blank" rel="noopener" style="color:var(--muted);text-decoration:underline">Privacy Policy</a>
-    <span style="margin:0 8px">·</span>
-    <span>© 2026 Ribbon Reflector</span>
-  </footer>`;
   return `${banner}<header>
     <div class="logo" onclick="go('home')"><div class="logo-mark">❦</div>Ribbon Reflector</div>
     <nav class="top">
@@ -1641,7 +1636,11 @@ const routes = {
 
 function render() {
   const fn = routes[store.route] || homePage;
-  $('#app').innerHTML = fn() + notifPanelHTML();
+  const footerHTML = '<footer style="text-align:center;padding:40px 20px 24px;font-size:12px;color:var(--muted);border-top:1px solid rgba(255,255,255,0.08);margin-top:60px">' +
+    '<a href="http://remaininlight.com/ribbon-privacy.html" target="_blank" rel="noopener" style="color:var(--muted);text-decoration:underline">Privacy Policy</a>' +
+    '<span style="margin:0 8px">\u00b7</span>' +
+    '<span>\u00a9 2026 Ribbon Reflector</span></footer>';
+  $('#app').innerHTML = fn() + notifPanelHTML() + footerHTML;
   if (store.route === 'postTickets') bindPostTicketsEvents();
   if (store.route === 'dispute') bindDisputeEvents();
 }
