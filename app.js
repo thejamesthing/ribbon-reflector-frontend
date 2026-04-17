@@ -202,7 +202,7 @@ function headerHTML() {
     <a onclick="resendVerification()" style="text-decoration:underline;cursor:pointer;margin-left:10px">Resend email</a>
   </div>` : '';
   return `${banner}<header>
-    <div class="logo" onclick="go('home')"><div class="logo-mark">❦</div>Ribbon Reflector</div>
+    <div class="logo" onclick="go('home')"><div class="logo-mark"><svg viewBox="0 0 36 36" width="32" height="32" style="display:block"><defs><linearGradient id="hlg" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#ff3d5a"/><stop offset="100%" stop-color="#ff7a2e"/></linearGradient></defs><rect width="36" height="36" rx="8" fill="#1a1a2e"/><path d="M4,12 L4,9 L32,9 L32,12 A3.5,3.5 0 0,0 32,19 L32,24 L32,27 L4,27 L4,24 A3.5,3.5 0 0,0 4,17 Z" fill="rgba(255,255,255,0.08)" stroke="rgba(255,255,255,0.12)" stroke-width="0.5"/><path d="M2,22 C8,9 15,23 18,15 C21,7 28,20 34,10" stroke="url(#hlg)" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M2,24.5 C8,13 15,25.5 18,18 C21,11 28,22.5 34,13.5" stroke="#ffb84d" stroke-width="1" fill="none" stroke-linecap="round" opacity="0.45"/></svg></div>Ribbon Reflector</div>
     <nav class="top">
       ${store.user ? `<a onclick="go('myTickets')">My Tickets</a>` : ''}
       ${store.activeTrade ? `<a onclick="go('wallet')" style="color:var(--orange)">TicketWallet ●</a>` : ''}
