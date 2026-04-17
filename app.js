@@ -545,7 +545,7 @@ if (tab === 'incoming') {
       const noteHTML = o.note ? `<div class="sub" style="margin-top:6px;font-style:italic">"${o.note}"</div>` : '';
       return `<div class="list-row">
         <div class="info">
-          <h4>${hl('@' + o.from_handle)} offered <strong>$${amt}</strong> for ${o.target_artist}</h4>
+          <h4>${hl(o.from_handle)} offered <strong>$${amt}</strong> for ${o.target_artist}</h4>
           <div class="sub">${o.target_venue} · ${o.target_date} · ${o.target_seat} (face $${face})</div>
           ${noteHTML}
         </div>
@@ -577,7 +577,7 @@ if (tab === 'incoming') {
       }
       return `<div class="list-row">
         <div class="info">
-          <h4>Offered <strong>$${amt}</strong> to ${hl('@' + o.to_handle)}</h4>
+          <h4>Offered <strong>$${amt}</strong> to ${hl(o.to_handle)}</h4>
           <div class="sub">${o.target_artist} · ${o.target_venue}</div>
         </div>
         ${statusPill}
@@ -1058,6 +1058,10 @@ function editProfilePage() {
         <button class="btn ghost" onclick="go('profile',{handle:store.user.handle})">Cancel</button>
       </div>
     </div>
+    <div style="margin-top:40px;padding-top:20px;border-top:1px solid rgba(255,255,255,0.1)">
+      <p style="color:var(--muted);font-size:13px;margin-bottom:10px">Want to leave Ribbon Reflector? This permanently deletes your account, listings, and trade history.</p>
+      <button class="btn ghost" style="border-color:var(--red);color:var(--red)" onclick="deleteAccount()">Delete my account</button>
+    </div>
   </div>`;
 }
 
@@ -1113,6 +1117,21 @@ async function saveProfile() {
     go('profile', { handle: store.user.handle });
   } catch (e) {
     alert('Could not save profile: ' + e.message);
+  }
+}
+
+async function deleteAccount() {
+  if (!confirm('Are you sure? This permanently deletes your account, listings, reviews, and trade history. This cannot be undone.')) return;
+  if (!confirm('Last chance — type DELETE to confirm.\n\n(Just kidding, click OK to confirm deletion.)')) return;
+  try {
+    await api('/me', { method: 'DELETE' });
+    setToken(null);
+    store.user = null;
+    store.activeTrade = null;
+    alert('Your account has been deleted. We\'re sorry to see you go.');
+    go('home');
+  } catch (e) {
+    alert('Could not delete account: ' + e.message);
   }
 }
 
