@@ -207,7 +207,7 @@ function headerHTML() {
       ${store.user ? `<a onclick="go('myTickets')">My Tickets</a>` : ''}
       ${store.activeTrade ? `<a onclick="go('wallet')" style="color:var(--orange)">TicketWallet ●</a>` : ''}
       <a onclick="go('browse')">Browse</a>
-      <div class="icon-btn" title="Messages">💬</div>
+      <a onclick="go('howItWorks')">How It Works</a>
       <div class="icon-btn bell-wrap" onclick="toggleNotifs()" title="Notifications">🔔${store.user && unreadCount() ? `<span class="bell-badge">${unreadCount()}</span>`:''}</div>
       ${store.user
         ? `<div class="avatar" onclick="go('profile',{handle:'${store.user.handle}'})" title="${store.user.handle}"></div>
@@ -1315,6 +1315,64 @@ async function cancelStripePayment() {
   go('myTickets');
 }
 
+// ===== HOW IT WORKS =====
+function howItWorksPage() {
+  const step = (num, icon, title, desc) =>
+    `<div style="display:flex;gap:18px;align-items:flex-start;margin-bottom:28px">
+      <div style="min-width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,var(--magenta),var(--orange));display:flex;align-items:center;justify-content:center;font-size:22px">${icon}</div>
+      <div>
+        <div style="font-size:11px;color:var(--magenta);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:4px">Step ${num}</div>
+        <h4 style="margin:0 0 6px;font-size:17px">${title}</h4>
+        <p style="color:var(--muted);font-size:14px;line-height:1.5;margin:0">${desc}</p>
+      </div>
+    </div>`;
+
+  return `${headerHTML()}<div class="sub-page" style="max-width:680px">
+    <h2>How Ribbon Reflector works</h2>
+    <span class="mono">Face value · Fan-to-fan · Escrow-protected</span>
+
+    <div class="panel" style="margin-top:28px;padding:28px">
+      <p style="font-size:15px;line-height:1.6;margin-bottom:28px">Ribbon Reflector is a fan-to-fan ticket marketplace where every ticket is listed at or below face value. No scalpers, no markups. Here's how a trade works:</p>
+
+      ${step('1', '🎟️', 'List your ticket',
+        'Post your ticket with the event details and face value. Upload your purchase receipt so we can verify the price. Listings go live after a quick review.')}
+
+      ${step('2', '💰', 'Buyer makes an offer',
+        'Fans browse listings and make cash offers up to the face value. They can include a message introducing themselves.')}
+
+      ${step('3', '✅', 'Seller accepts',
+        'When you accept an offer, the buyer is asked to pay within 24 hours. Their card is charged and the funds are held in escrow by Stripe — you don\x27t touch the money yet.')}
+
+      ${step('4', '✈️', 'Transfer the ticket',
+        'The seller transfers the ticket through their venue or ticketing app (Ticketmaster, AXS, etc.). Then they mark it as sent in Ribbon Reflector.')}
+
+      ${step('5', '📬', 'Buyer confirms receipt',
+        'Once the buyer receives the ticket in their app, they confirm receipt. This triggers the escrow release.')}
+
+      ${step('6', '🎉', 'Escrow releases to seller',
+        'Funds transfer automatically from escrow to the seller\x27s linked bank account via Stripe. Both sides are prompted to leave a review.')}
+    </div>
+
+    <div class="panel" style="margin-top:20px;padding:24px">
+      <h4 style="margin-bottom:12px">What if something goes wrong?</h4>
+      <p style="color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 10px">Either party can open a dispute at any point during the trade. When a dispute is filed, escrow is paused and our support team reviews the case within 24 hours. Funds are never released until the issue is resolved.</p>
+      <p style="color:var(--muted);font-size:14px;line-height:1.6;margin:0">Ribbon Reflector does not guarantee ticket validity. We verify face value via purchase receipts, but the actual ticket transfer is between you and your trade partner through the venue's ticketing platform.</p>
+    </div>
+
+    <div class="panel" style="margin-top:20px;padding:24px">
+      <h4 style="margin-bottom:12px">Getting started</h4>
+      <p style="color:var(--muted);font-size:14px;line-height:1.6;margin:0 0 16px">To buy or sell, you need a Ribbon Reflector membership ($10/year), a verified email address, and (for sellers) a connected Stripe account for payouts.</p>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        ${store.user
+          ? `<button class="btn gold" onclick="go('browse')">Browse tickets</button>
+             <button class="btn ghost" onclick="go('postTickets')">Post a ticket</button>`
+          : `<button class="btn gold" onclick="go('signup')">Join for $10/year</button>
+             <button class="btn ghost" onclick="go('browse')">Browse first</button>`}
+      </div>
+    </div>
+  </div>`;
+}
+
 // ===== WALLET POLLING (Step 8d) =====
 async function pollWalletTrade() {
   if (store.route !== 'wallet') return;
@@ -1625,6 +1683,7 @@ const routes = {
   home: homePage, browse: browsePage,
   signup: signupPage, login: loginPage, checkout: checkoutPage,
   forgotPassword: forgotPasswordPage, resetPassword: resetPasswordPage,
+  howItWorks: howItWorksPage,
   payTrade: payTradePage,
   postTickets: postTicketsPage, myTickets: myTicketsPage,
   wallet: walletPage, reviews: reviewsPage,
