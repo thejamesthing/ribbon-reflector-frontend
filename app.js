@@ -243,7 +243,7 @@ function headerHTML() {
            <a onclick="doLogout()" style="font-size:13px;opacity:0.7">Sign out</a>
            <button class="post-btn" onclick="go('postTickets')">Post Tickets</button>`
         : `<a onclick="go('login')">Sign in</a>
-           <button class="post-btn" onclick="go('signup')">Join $10/yr</button>`}
+           <button class="post-btn" onclick="go('signup')">Join Free</button>`}
     </nav>
   </header>`;
 }
