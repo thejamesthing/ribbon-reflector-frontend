@@ -170,11 +170,50 @@ async function go(route, params) {
   }
   store.route = route;
   store.params = params || {};
+  // Push clean URL to browser history for shareable pages.
+  const cleanPath = routeToPath(route, params);
+  if (cleanPath !== null && window.location.pathname !== cleanPath) {
+    window.history.pushState({ route, params }, '', cleanPath);
+  }
   render();
   await loadRouteData(route, params);
   render();
   window.scrollTo(0, 0);
 }
+
+function routeToPath(route, params) {
+  if (route === 'home') return '/';
+  if (route === 'profile' && params?.handle) return '/' + params.handle.replace(/^@/, '');
+  if (route === 'browse') return '/browse';
+  if (route === 'howItWorks') return '/how-it-works';
+  if (route === 'login') return '/login';
+  if (route === 'signup') return '/signup';
+  if (route === 'reviews') return '/reviews';
+  return null; // internal routes don't get a URL
+}
+
+function pathToRoute(path) {
+  if (path === '/' || path === '') return { route: 'home', params: {} };
+  if (path === '/browse') return { route: 'browse', params: {} };
+  if (path === '/how-it-works') return { route: 'howItWorks', params: {} };
+  if (path === '/login') return { route: 'login', params: {} };
+  if (path === '/signup') return { route: 'signup', params: {} };
+  if (path === '/reviews') return { route: 'reviews', params: {} };
+  // Anything else is a profile handle: /james → @james
+  const handle = '@' + path.slice(1).replace(/^@/, '');
+  if (handle.length > 1) return { route: 'profile', params: { handle } };
+  return { route: 'home', params: {} };
+}
+
+// Handle browser back/forward buttons.
+window.addEventListener('popstate', async (e) => {
+  const { route, params } = e.state || pathToRoute(window.location.pathname);
+  store.route = route;
+  store.params = params || {};
+  render();
+  await loadRouteData(route, params);
+  render();
+});
 
 // ===== HELPERS =====
 const $ = (s, el=document) => el.querySelector(s);
@@ -1867,5 +1906,9 @@ async function submitResetPassword() {
 // On initial load, check for a verification token in the URL, then route.
 (async () => {
   const handled = await handleInitialUrl();
-  if (!handled) go('home');
+  if (!handled) {
+    // Parse clean URL path for deep-linking (e.g. /james → profile).
+    const { route, params } = pathToRoute(window.location.pathname);
+    go(route, params);
+  }
 })();
