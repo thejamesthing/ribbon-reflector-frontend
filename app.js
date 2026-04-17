@@ -492,7 +492,15 @@ function bindPostTicketsEvents() {
   label.addEventListener('click', e => { if (e.target !== input) input.click(); });
   input.addEventListener('change', e => {
     const f = e.target.files[0];
-    if (f) { store._receiptName = f.name; render(); }
+    if (f) {
+      store._receiptName = f.name;
+      const icon = label.querySelector('.icon');
+      const paras = label.querySelectorAll('p');
+      if (icon) icon.textContent = '✓';
+      label.classList.add('has-file');
+      if (paras[0]) paras[0].innerHTML = '<strong>' + f.name + '</strong>';
+      if (paras[1]) paras[1].textContent = 'Click to replace';
+    }
   });
 }
 
@@ -1524,12 +1532,18 @@ function composeOfferPage() {
 
 function updateOfferAmount(v) {
   const n = parseFloat(v);
-  if (!isFinite(n) || n <= 0) {
+  if (!Number.isFinite(n) || n <= 0) {
     store.compose.amountCents = null;
   } else {
     store.compose.amountCents = Math.round(n * 100);
   }
-  render();
+  const target = store.listings.find(x => x.id === store.compose.targetId)
+    || store.myListings.find(x => x.id === store.compose.targetId);
+  if (!target) return;
+  const faceCents = Math.round(Number(target.face) * 100);
+  const valid = store.compose.amountCents != null && store.compose.amountCents > 0 && store.compose.amountCents <= faceCents;
+  const btn = document.querySelector('.actions .btn.gold');
+  if (btn) btn.disabled = !valid;
 }
 
 function selectMyListing(id) {
