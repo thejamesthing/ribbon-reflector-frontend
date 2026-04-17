@@ -3,18 +3,21 @@
 body{background:var(--bg);color:#fff;font-family:'Inter',sans-serif;min-height:100vh}
 .hero-wrap{position:relative;overflow:hidden;background:#0a0a14}
 .hero-wrap::before{content:"";position:absolute;inset:0;background:
-  conic-gradient(from 200deg at 50% -10%,transparent 0deg,rgba(130,60,255,0.7) 4deg,transparent 8deg),
-  conic-gradient(from 215deg at 50% -10%,transparent 0deg,rgba(90,40,220,0.5) 3deg,transparent 7deg),
-  conic-gradient(from 230deg at 50% -10%,transparent 0deg,rgba(60,200,160,0.6) 4deg,transparent 9deg),
-  conic-gradient(from 250deg at 50% -10%,transparent 0deg,rgba(130,60,255,0.5) 3deg,transparent 6deg),
-  conic-gradient(from 270deg at 50% -10%,transparent 0deg,rgba(200,180,255,0.4) 2deg,transparent 5deg),
-  conic-gradient(from 290deg at 50% -10%,transparent 0deg,rgba(60,220,180,0.6) 4deg,transparent 8deg),
-  conic-gradient(from 310deg at 50% -10%,transparent 0deg,rgba(160,80,255,0.5) 3deg,transparent 7deg),
-  conic-gradient(from 330deg at 50% -10%,transparent 0deg,rgba(80,60,220,0.6) 4deg,transparent 9deg),
-  conic-gradient(from 170deg at 50% -10%,transparent 0deg,rgba(60,180,140,0.5) 3deg,transparent 7deg),
-  conic-gradient(from 155deg at 50% -10%,transparent 0deg,rgba(140,60,255,0.4) 4deg,transparent 8deg),
+  conic-gradient(from 200deg at 50% -10%,transparent 0deg,rgba(130,60,255,0.6) 4deg,transparent 8deg),
+  conic-gradient(from 340deg at 50% -10%,transparent 0deg,rgba(130,60,255,0.6) 4deg,transparent 8deg),
+  conic-gradient(from 218deg at 50% -10%,transparent 0deg,rgba(60,200,160,0.55) 3deg,transparent 7deg),
+  conic-gradient(from 322deg at 50% -10%,transparent 0deg,rgba(60,200,160,0.55) 3deg,transparent 7deg),
+  conic-gradient(from 235deg at 50% -10%,transparent 0deg,rgba(90,40,220,0.5) 4deg,transparent 9deg),
+  conic-gradient(from 305deg at 50% -10%,transparent 0deg,rgba(90,40,220,0.5) 4deg,transparent 9deg),
+  conic-gradient(from 252deg at 50% -10%,transparent 0deg,rgba(160,80,255,0.45) 3deg,transparent 6deg),
+  conic-gradient(from 288deg at 50% -10%,transparent 0deg,rgba(160,80,255,0.45) 3deg,transparent 6deg),
+  conic-gradient(from 270deg at 50% -10%,transparent 0deg,rgba(200,180,255,0.35) 2deg,transparent 5deg),
+  conic-gradient(from 185deg at 50% -10%,transparent 0deg,rgba(60,180,140,0.4) 3deg,transparent 7deg),
+  conic-gradient(from 355deg at 50% -10%,transparent 0deg,rgba(60,180,140,0.4) 3deg,transparent 7deg),
   radial-gradient(ellipse at 50% 100%,rgba(180,100,255,0.3) 0%,transparent 60%),
   radial-gradient(ellipse at 30% 80%,rgba(60,200,160,0.15) 0%,transparent 40%),
+  radial-gradient(ellipse at 70% 80%,rgba(60,200,160,0.15) 0%,transparent 40%),
+  radial-gradient(ellipse at 30% 80%,rgba(100,60,220,0.15) 0%,transparent 40%),
   radial-gradient(ellipse at 70% 80%,rgba(100,60,220,0.15) 0%,transparent 40%);
   opacity:1}
 .hero-wrap::after{content:"";position:absolute;inset:0;background:
