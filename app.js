@@ -213,7 +213,7 @@ function headerHTML() {
 function homePage() {
   const mine = store.myListings.length ? store.myListings : store.listings.slice(0, 4);
   return `
-  <div class="hero-wrap">${headerHTML()}
+  <div class="hero-wrap"><div class="hero-mirror"></div>${headerHTML()}
     <div class="hero">
       <h1>Face Value Tickets</h1>
       <p class="tag">Built by fans, for fans.<br>The show you love at the real price.</p>
