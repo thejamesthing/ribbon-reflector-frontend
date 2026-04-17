@@ -86,8 +86,19 @@ async function loadRouteData(route, params) {
           emailVerified: !!me.email_verified,
           stripeStatus: me.stripe_account_status || 'none',
           avatarUrl: me.avatar_data_url || null,
+          isAdmin: !!me.is_admin,
         };
       } catch {}
+    }
+    if (route === 'admin' && store.user?.isAdmin) {
+      try {
+        store._adminData = {
+          stats: await api('/admin/stats'),
+          users: await api('/admin/users'),
+          listings: await api('/admin/listings'),
+          trades: await api('/admin/trades'),
+        };
+      } catch (e) { console.error('admin load failed:', e); }
     }
     if (route === 'home' || route === 'browse') {
       const f = store.filters;
@@ -237,6 +248,7 @@ function headerHTML() {
       ${store.activeTrade ? `<a onclick="go('wallet')" style="color:var(--orange)">TicketWallet ●</a>` : ''}
       <a onclick="go('browse')">Browse</a>
       <a onclick="go('howItWorks')">How It Works</a>
+      ${store.user?.isAdmin ? '<a onclick="go(\'admin\')" style="color:var(--orange)">Admin</a>' : ''}
       <div class="icon-btn bell-wrap" onclick="toggleNotifs()" title="Notifications">🔔${store.user && unreadCount() ? `<span class="bell-badge">${unreadCount()}</span>`:''}</div>
       ${store.user
         ? `<div class="avatar" onclick="go('profile',{handle:'${store.user.handle}'})" title="${store.user.handle}" ${store.user.avatarUrl ? `style="background-image:url('${store.user.avatarUrl}');background-size:cover;background-position:center"` : ''}></div>
@@ -398,9 +410,11 @@ async function doLogin() {
         isMember: !!me.is_member, memberUntil: me.member_until,
         emailVerified: !!me.email_verified,
         stripeStatus: me.stripe_account_status || 'none',
+        isAdmin: !!me.is_admin,
+        avatarUrl: me.avatar_data_url || null,
       };
     } catch {}
-    store.user = { handle: u.handle, email: u.email, isMember: !!u.is_member, memberUntil: u.member_until };
+    if (!store.user) store.user = { handle: u.handle, email: u.email, isMember: !!u.is_member, memberUntil: u.member_until };
     go('home');
   } catch (e) { alert('Login failed: ' + e.message); }
 }
@@ -1402,6 +1416,152 @@ function howItWorksPage() {
   </div>`;
 }
 
+// ===== ADMIN PANEL =====
+function adminPage() {
+  if (!store.user?.isAdmin) { go('home'); return ''; }
+  const d = store._adminData || {};
+  const stats = d.stats || {};
+  const users = d.users || [];
+  const listings = d.listings || [];
+  const trades = d.trades || [];
+  const tab = store.params.tab || 'overview';
+
+  const tabBtn = (id, label, count) =>
+    `<div class="tab ${tab===id?'active':''}" onclick="go('admin',{tab:'${id}'})">${label}${count != null ? ' ('+count+')' : ''}</div>`;
+
+  let content = '';
+
+  if (tab === 'overview') {
+    content = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:30px">
+        <div class="panel" style="padding:20px;text-align:center">
+          <div style="font-size:32px;font-weight:700;color:var(--magenta)">${stats.userCount || 0}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">Total users</div>
+        </div>
+        <div class="panel" style="padding:20px;text-align:center">
+          <div style="font-size:32px;font-weight:700;color:var(--orange)">${stats.activeListings || 0}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">Active listings</div>
+        </div>
+        <div class="panel" style="padding:20px;text-align:center">
+          <div style="font-size:32px;font-weight:700;color:var(--green)">${stats.completedTrades || 0}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">Completed trades</div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px">
+        <div class="panel" style="padding:20px;text-align:center">
+          <div style="font-size:32px;font-weight:700">${stats.listingCount || 0}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">Total listings</div>
+        </div>
+        <div class="panel" style="padding:20px;text-align:center">
+          <div style="font-size:32px;font-weight:700">${stats.tradeCount || 0}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">Total trades</div>
+        </div>
+        <div class="panel" style="padding:20px;text-align:center">
+          <div style="font-size:32px;font-weight:700;color:var(--green)">$${((stats.totalVolumeCents||0)/100).toFixed(2)}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">Total volume</div>
+        </div>
+      </div>`;
+  }
+
+  if (tab === 'users') {
+    content = `<div class="panel" style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1px solid var(--line);text-align:left">
+        <th style="padding:10px">ID</th><th style="padding:10px">Handle</th><th style="padding:10px">Email</th>
+        <th style="padding:10px">Verified</th><th style="padding:10px">Stripe</th>
+        <th style="padding:10px">Listings</th><th style="padding:10px">Trades</th>
+        <th style="padding:10px">Admin</th><th style="padding:10px">Actions</th>
+      </tr></thead><tbody>
+      ${users.map(u => `<tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:8px 10px">${u.id}</td>
+        <td style="padding:8px 10px">${hl(u.handle)}</td>
+        <td style="padding:8px 10px;font-size:11px">${u.email}</td>
+        <td style="padding:8px 10px">${u.email_verified ? '\u2705' : '\u274c'}</td>
+        <td style="padding:8px 10px"><span class="pill ${u.stripe_account_status==='enabled'?'green':u.stripe_account_status==='pending'?'orange':'gray'}">${u.stripe_account_status||'none'}</span></td>
+        <td style="padding:8px 10px">${u.listing_count}</td>
+        <td style="padding:8px 10px">${u.trade_count}</td>
+        <td style="padding:8px 10px">${u.is_admin ? '\u2b50' : ''}</td>
+        <td style="padding:8px 10px">
+          ${!u.is_admin ? `<button class="btn ghost" style="font-size:11px;padding:4px 8px" onclick="adminAction('promote',${u.id})">Make admin</button>` : ''}
+          <button class="btn ghost" style="font-size:11px;padding:4px 8px;border-color:var(--red);color:var(--red)" onclick="adminAction('deleteUser',${u.id},'${u.handle}')">Delete</button>
+        </td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+  }
+
+  if (tab === 'listings') {
+    content = `<div class="panel" style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1px solid var(--line);text-align:left">
+        <th style="padding:10px">ID</th><th style="padding:10px">Artist</th><th style="padding:10px">Venue</th>
+        <th style="padding:10px">Price</th><th style="padding:10px">Owner</th>
+        <th style="padding:10px">Status</th><th style="padding:10px">Actions</th>
+      </tr></thead><tbody>
+      ${listings.map(l => `<tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:8px 10px">${l.id}</td>
+        <td style="padding:8px 10px">${l.artist}</td>
+        <td style="padding:8px 10px">${l.venue}</td>
+        <td style="padding:8px 10px">$${(l.face_value||0).toFixed(2)}</td>
+        <td style="padding:8px 10px">${hl(l.owner_handle)}</td>
+        <td style="padding:8px 10px"><span class="pill ${l.status==='active'?'green':l.status==='traded'?'blue':'orange'}">${l.status}</span></td>
+        <td style="padding:8px 10px">
+          ${l.status!=='active' ? `<button class="btn ghost" style="font-size:11px;padding:4px 8px" onclick="adminAction('approve',${l.id})">Approve</button>` : ''}
+          <button class="btn ghost" style="font-size:11px;padding:4px 8px;border-color:var(--red);color:var(--red)" onclick="adminAction('deleteListing',${l.id})">Delete</button>
+        </td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+  }
+
+  if (tab === 'trades') {
+    content = `<div class="panel" style="overflow-x:auto"><table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead><tr style="border-bottom:1px solid var(--line);text-align:left">
+        <th style="padding:10px">ID</th><th style="padding:10px">Event</th>
+        <th style="padding:10px">Buyer</th><th style="padding:10px">Seller</th>
+        <th style="padding:10px">Amount</th><th style="padding:10px">Status</th>
+        <th style="padding:10px">Payment</th><th style="padding:10px">Transfer</th>
+      </tr></thead><tbody>
+      ${trades.map(t => `<tr style="border-bottom:1px solid var(--line)">
+        <td style="padding:8px 10px">${t.id}</td>
+        <td style="padding:8px 10px">${t.artist} @ ${t.venue}</td>
+        <td style="padding:8px 10px">${hl(t.buyer_handle)}</td>
+        <td style="padding:8px 10px">${hl(t.seller_handle)}</td>
+        <td style="padding:8px 10px">$${((t.amount_cents||0)/100).toFixed(2)}</td>
+        <td style="padding:8px 10px"><span class="pill ${t.status==='complete'?'green':t.status==='active'?'orange':'gray'}">${t.status}</span></td>
+        <td style="padding:8px 10px">${t.payment_status||'\u2014'}</td>
+        <td style="padding:8px 10px;font-size:10px">${t.transfer_id ? t.transfer_id.slice(0,12)+'...' : '\u2014'}</td>
+      </tr>`).join('')}
+      </tbody></table></div>`;
+  }
+
+  return `${headerHTML()}<div class="sub-page">
+    <h2 style="color:var(--orange)">Admin Panel</h2>
+    <span class="mono">Manage users, listings, and trades</span>
+    <div class="tabs" style="margin-top:20px">
+      ${tabBtn('overview','Overview')}
+      ${tabBtn('users','Users',users.length)}
+      ${tabBtn('listings','Listings',listings.length)}
+      ${tabBtn('trades','Trades',trades.length)}
+    </div>
+    ${content}
+  </div>`;
+}
+
+async function adminAction(action, id, extra) {
+  try {
+    if (action === 'deleteUser') {
+      if (!confirm('Permanently delete user ' + extra + '? This removes all their data.')) return;
+      await api('/admin/users/' + id, { method: 'DELETE' });
+    } else if (action === 'promote') {
+      if (!confirm('Make this user an admin?')) return;
+      await api('/admin/users/' + id + '/promote', { method: 'POST' });
+    } else if (action === 'deleteListing') {
+      if (!confirm('Delete this listing?')) return;
+      await api('/admin/listings/' + id, { method: 'DELETE' });
+    } else if (action === 'approve') {
+      await api('/admin/listings/' + id + '/approve', { method: 'POST' });
+    }
+    go('admin', store.params);
+  } catch (e) { alert('Admin action failed: ' + e.message); }
+}
+
 // ===== WALLET POLLING (Step 8d) =====
 async function pollWalletTrade() {
   if (store.route !== 'wallet') return;
@@ -1713,6 +1873,7 @@ const routes = {
   signup: signupPage, login: loginPage, checkout: checkoutPage,
   forgotPassword: forgotPasswordPage, resetPassword: resetPasswordPage,
   howItWorks: howItWorksPage,
+  admin: adminPage,
   payTrade: payTradePage,
   postTickets: postTicketsPage, myTickets: myTicketsPage,
   wallet: walletPage, reviews: reviewsPage,
